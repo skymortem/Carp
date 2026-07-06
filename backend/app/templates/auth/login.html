@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Вход — Carp{% endblock %}
+{% block content %}
+<div class="max-w-sm mx-auto mt-20">
+    <h2 class="text-2xl font-bold mb-6">Вход</h2>
+    <form hx-post="/auth/login" hx-target="#result" hx-swap="innerHTML"
+          x-data @submit.prevent="
+            fetch('/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email:email, password:password})})
+            .then(r=>r.json()).then(d=>{ if(d.ok) { document.cookie='access_token='+d.token+';path=/'; window.location='/dashboard'; } else { result=d.detail; }})
+          ">
+        <div class="mb-4">
+            <label class="block text-sm text-slate-400 mb-1">Email</label>
+            <input type="email" x-model="email" class="input" required>
+        </div>
+        <div class="mb-4">
+            <label class="block text-sm text-slate-400 mb-1">Пароль</label>
+            <input type="password" x-model="password" class="input" required>
+        </div>
+        <button type="submit" class="btn-primary w-full">Войти</button>
+        <div id="result" class="mt-3 text-sm text-red-400"></div>
+    </form>
+    <p class="mt-4 text-sm text-slate-500">
+        Нет аккаунта? <a href="/register" class="text-blue-400">Зарегистрироваться</a>
+    </p>
+</div>
+{% endblock %}

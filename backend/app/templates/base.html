@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Carp{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        dark: { 50: '#f8fafc', 100: '#1e293b', 200: '#334155', 300: '#475569', 400: '#64748b', 500: '#94a3b8', 600: '#cbd5e1', 700: '#e2e8f0', 800: '#f1f5f9', 900: '#f8fafc' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background: #0f172a; color: #e2e8f0; }
+        .card { background: #1e293b; border: 1px solid #334155; border-radius: 0.75rem; }
+        .btn-primary { background: #3b82f6; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; font-weight: 600; }
+        .btn-primary:hover { background: #2563eb; }
+        .btn-secondary { background: #334155; color: #e2e8f0; padding: 0.5rem 1rem; border-radius: 0.5rem; }
+        .btn-secondary:hover { background: #475569; }
+        .input { background: #0f172a; border: 1px solid #334155; border-radius: 0.5rem; padding: 0.5rem 0.75rem; color: #e2e8f0; width: 100%; }
+        .input:focus { outline: none; border-color: #3b82f6; }
+        .badge { padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }
+    </style>
+</head>
+<body class="min-h-screen">
+    <nav class="border-b border-slate-700/50 px-6 py-3 flex items-center justify-between">
+        <a href="/" class="text-xl font-bold text-blue-400">🚗 Carp</a>
+        <div class="flex items-center gap-4 text-sm">
+            {% if user %}
+                <span class="text-slate-400">{{ user.username }}</span>
+                <a href="/dashboard" class="text-slate-300 hover:text-white">Дашборд</a>
+                <a href="/setup" class="text-slate-300 hover:text-white">Настройки</a>
+                <button hx-post="/auth/logout" hx-target="body" hx-push-url="/" class="text-red-400 hover:text-red-300">Выйти</button>
+            {% else %}
+                <a href="/login" class="text-slate-300 hover:text-white">Войти</a>
+                <a href="/register" class="btn-primary text-sm">Регистрация</a>
+            {% endif %}
+        </div>
+    </nav>
+    <main class="container mx-auto px-4 py-8 max-w-6xl">
+        {% block content %}{% endblock %}
+    </main>
+
+    <script>
+        // Глобальный обработчик ошибок HTMX
+        document.body.addEventListener('htmx:responseError', function(evt) {
+            const detail = evt.detail;
+            if (detail.xhr.status === 401) {
+                window.location.href = '/login';
+            }
+        });
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

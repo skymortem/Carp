@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Настройки StarLine — Carp{% endblock %}
+{% block content %}
+<div x-data="setup()" class="max-w-lg mx-auto mt-10">
+    <h2 class="text-2xl font-bold mb-6">📡 Подключение StarLine</h2>
+
+    <div class="card p-6 mb-6">
+        <p class="text-sm text-slate-400 mb-4">
+            Введи данные от личного кабинета разработчика StarLine
+            (<a href="https://my.starline.ru" class="text-blue-400" target="_blank">my.starline.ru</a>,
+            раздел «Разработчикам»).
+        </p>
+
+        <div class="mb-4">
+            <label class="block text-sm text-slate-400 mb-1">App ID</label>
+            <input type="text" x-model="appId" class="input" placeholder="Например: 12345">
+        </div>
+        <div class="mb-4">
+            <label class="block text-sm text-slate-400 mb-1">App Secret</label>
+            <input type="text" x-model="appSecret" class="input" placeholder="Секрет приложения">
+        </div>
+        <div class="mb-4">
+            <label class="block text-sm text-slate-400 mb-1">Логин StarLine Online</label>
+            <input type="text" x-model="login" class="input" placeholder="Твой email/логин">
+        </div>
+        <div class="mb-4">
+            <label class="block text-sm text-slate-400 mb-1">Пароль StarLine Online</label>
+            <input type="password" x-model="password" class="input" placeholder="Пароль">
+        </div>
+
+        <div class="mb-4">
+            <label class="block text-sm text-slate-400 mb-1">
+                Device ID <span class="text-slate-500">(необязательно — если автоопределение не сработало)</span>
+            </label>
+            <input type="text" x-model="deviceId" class="input" placeholder="Например: AB1234CD5678EF90">
+        </div>
+
+        <button @click="connect()" :disabled="loading" class="btn-primary w-full"
+                x-text="loading ? 'Подключаюсь...' : '🔗 Подключить'">
+        </button>
+
+        <div class="mt-4 text-sm" x-text="message" :class="error ? 'text-red-400' : 'text-green-400'"></div>
+    </div>
+
+    <div class="card p-6" x-show="result">
+        <h3 class="font-bold mb-2">✅ Подключено!</h3>
+        <div class="text-sm space-y-1">
+            <p>Устройство: <span class="text-blue-400" x-text="result?.device_name"></span></p>
+            <p>Пробег: <span class="text-green-400" x-text="result?.mileage_km + ' км'"></span></p>
+            <p>Топливо: <span class="text-green-400" x-text="result?.fuel_litres + ' л'"></span></p>
+        </div>
+        <a href="/dashboard" class="btn-primary mt-4 inline-block">К дашборду →</a>
+    </div>
+</div>
+
+<script>
+    function setup() {
+        return {
+            appId: '',
+            appSecret: '',
+            login: '',
+            password: '',
+            deviceId: '',
+            loading: false,
+            message: '',
+            error: false,
+            result: null,
+            async connect() {
+                this.loading = true;
+                this.message = '';
+                this.error = false;
+                this.result = null;
+                try {
+                    const r = await fetch('/starline/connect', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            app_id: this.appId,
+                            app_secret: this.appSecret,
+                            login: this.login,
+                            password: this.password,
+                            device_id: this.deviceId || undefined
+                        })
+                    });
+                    const d = await r.json();
+                    if (d.ok) {
+                        this.result = d;
+                        this.message = '✅ StarLine подключён!';
+                    } else {
+                        this.error = true;
+                        this.message = '❌ ' + (d.detail || 'Ошибка подключения');
+                    }
+                } catch(e) {
+                    this.error = true;
+                    this.message = '❌ Ошибка сети: ' + e;
+                } finally {
+                    this.loading = false;
+                }
+            }
+        };
+    }
+</script>
+{% endblock %}
