@@ -1,3 +1,6 @@
+
+# !under construction!
+
 # Carp 🚗
 
 **Carp** is a self-hosted web application for tracking car expenses, mileage, fuel consumption, and engine hours — with **automatic data collection** via StarLine GSM alarm systems.
@@ -111,4 +114,4 @@ backend/
 
 ## 📄 License
 
-MIT
+ Apache License Version 2.0
