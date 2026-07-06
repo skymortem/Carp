@@ -54,7 +54,7 @@ Instead of manually punching numbers into a spreadsheet, Carp fetches real telem
 
 ```bash
 # Clone
-git clone https://github.com/yourname/carp.git
+git clone https://github.com/skymortem/carp.git
 cd carp/backend
 
 # Virtual environment
