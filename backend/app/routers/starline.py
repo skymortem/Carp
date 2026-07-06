@@ -94,6 +94,11 @@ async def connect_to_starline(
         snapshot = StarLineClient.parse_snapshot(data)
         snap = StarSnap(car_id=car.id, **snapshot)
         db.add(snap)
+
+        # Автоустановка начальных моточасов при первом подключении
+        if car.initial_motohours == 0 and snapshot.get("motohours_minutes"):
+            car.initial_motohours = snapshot["motohours_minutes"]
+
         await db.commit()
         await db.refresh(snap)
 
@@ -242,3 +247,32 @@ async def status(
         "device_id": car.starline_device_id,
         "snaps_count": len(car.snaps) if car.snaps else 0,
     }
+
+
+@router.post("/reset-motohours")
+async def reset_motohours(
+    user: User = Depends(get_current_user_from_cookie),
+    db: AsyncSession = Depends(get_db),
+):
+    """Сбросить счётчик моточасов — установить текущие как точку отсчёта."""
+    result = await db.execute(
+        select(Car).where(Car.user_id == user.id, Car.starline_device_id.isnot(None)).limit(1)
+    )
+    car = result.scalar_one_or_none()
+    if not car:
+        raise HTTPException(status_code=400, detail="No StarLine car found")
+
+    # Получаем текущие моточасы из последнего снепшота
+    snap_result = await db.execute(
+        select(StarSnap).where(StarSnap.car_id == car.id)
+        .order_by(StarSnap.ts.desc()).limit(1)
+    )
+    snap = snap_result.scalar_one_or_none()
+    if not snap or snap.motohours_minutes is None:
+        raise HTTPException(status_code=400, detail="No motohours data yet. Start the engine and fetch first.")
+
+    car.initial_motohours = snap.motohours_minutes
+    car.motohours_reset_at = snap.ts
+    await db.commit()
+
+    return {"ok": True, "initial_motohours": car.initial_motohours, "reset_at": snap.ts.isoformat() if snap.ts else None}

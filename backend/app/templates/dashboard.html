@@ -4,15 +4,20 @@
 <div x-data="dashboard()">
     <div class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-bold">📊 Дашборд</h1>
-        {% if starline_connected %}
-            <button @click="fetchStarLine()" :disabled="loading"
-                    class="btn-primary text-sm" x-text="loading ? 'Загрузка...' : '🔄 Собрать сейчас'">
-            </button>
-        {% endif %}
+        <div class="flex gap-2">
+            {% if starline_connected %}
+                <button @click="resetMotohours()" class="btn-secondary text-sm"
+                        x-text="resetting ? 'Сброс...' : '⏱ Сбросить моточасы'">
+                </button>
+                <button @click="fetchStarLine()" :disabled="loading"
+                        class="btn-primary text-sm" x-text="loading ? 'Загрузка...' : '🔄 Собрать сейчас'">
+                </button>
+            {% endif %}
+        </div>
     </div>
 
     <!-- Индикаторы -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
         <div class="card p-4">
             <div class="text-sm text-slate-400">Пробег</div>
             <div class="text-2xl font-bold" x-text="latest?.mileage_km ? latest.mileage_km.toLocaleString() + ' км' : '—'"></div>
@@ -29,6 +34,11 @@
             <div class="text-sm text-slate-400">Двигатель</div>
             <div class="text-2xl font-bold" x-text="latest?.engine_on ? '🔥 Заведён' : '⏹ Заглушен'" 
                  :class="latest?.engine_on ? 'text-green-400' : 'text-slate-400'"></div>
+        </div>
+        <div class="card p-4">
+            <div class="text-sm text-slate-400">Моточасы</div>
+            <div class="text-2xl font-bold text-amber-400" x-text="motohoursDisplay"></div>
+            <div class="text-xs text-slate-500 mt-1" x-show="latest?.engine_on">🟢 считаются</div>
         </div>
     </div>
 
@@ -93,11 +103,22 @@
 {% if snaps_reversed|length > 1 %}
 <script>
     const snaps = {{ snaps_reversed|tojson }};
+    const initialMotohours = {{ initial_motohours|default(0) }};
 
     function dashboard() {
         return {
             loading: false,
+            resetting: false,
             latest: snaps.length > 0 ? snaps[snaps.length - 1] : null,
+            get motohoursDisplay() {
+                const m = this.latest?.motohours_minutes;
+                if (m === null || m === undefined) return '—';
+                const since = m - initialMotohours;
+                if (since < 0) return Math.floor(m/60) + 'ч ' + (m%60) + 'м';
+                const h = Math.floor(since / 60);
+                const min = since % 60;
+                return h + 'ч ' + min + 'м';
+            },
             async fetchStarLine() {
                 this.loading = true;
                 try {
@@ -107,6 +128,17 @@
                     else alert('Ошибка: ' + (d.detail || 'неизвестно'));
                 } catch(e) { alert('Ошибка сети: ' + e); }
                 finally { this.loading = false; }
+            },
+            async resetMotohours() {
+                if (!confirm('Сбросить счётчик моточасов? Текущие моточасы станут точкой отсчёта.')) return;
+                this.resetting = true;
+                try {
+                    const r = await fetch('/starline/reset-motohours', {method:'POST'});
+                    const d = await r.json();
+                    if (d.ok) location.reload();
+                    else alert('Ошибка: ' + (d.detail || 'неизвестно'));
+                } catch(e) { alert('Ошибка сети: ' + e); }
+                finally { this.resetting = false; }
             }
         };
     }

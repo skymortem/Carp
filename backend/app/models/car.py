@@ -19,6 +19,10 @@ class Car(Base):
     # Привязка к StarLine
     starline_device_id = Column(String, nullable=True)
 
+    # Моточасы (точка отсчёта для счётчика)
+    initial_motohours = Column(Integer, default=0)
+    motohours_reset_at = Column(DateTime(timezone=True), nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User", backref="cars")
@@ -52,6 +56,7 @@ class StarSnap(Base):
     is_armed = Column(Boolean, nullable=True)            # state.arm
     ctemperature = Column(Float, nullable=True)          # common.ctemp
     etemperature = Column(Float, nullable=True)          # common.etemp
+    motohours_minutes = Column(Integer, nullable=True)   # state.motohrs
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

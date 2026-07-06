@@ -252,4 +252,5 @@ class StarLineClient:
             "is_armed": bool(state.get("arm")),
             "ctemperature": common.get("ctemp"),
             "etemperature": common.get("etemp"),
+            "motohours_minutes": state.get("motohrs"),
         }

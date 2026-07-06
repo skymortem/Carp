@@ -71,6 +71,7 @@ async def dashboard_page(
                 "battery_v": s.battery_v,
                 "ctemperature": s.ctemperature,
                 "etemperature": s.etemperature,
+                "motohours_minutes": s.motohours_minutes,
                 "lat": s.lat,
                 "lon": s.lon,
                 "created_at": s.created_at.isoformat() if s.created_at else None,
@@ -82,7 +83,9 @@ async def dashboard_page(
 
     return HTMLResponse(render("dashboard.html", request=request,
         user=user, car=car, snaps=snaps,
-        snaps_reversed=snaps_reversed, starline_connected=starline_connected))
+        snaps_reversed=snaps_reversed, starline_connected=starline_connected,
+        initial_motohours=getattr(car, "initial_motohours", 0) if car else 0,
+        motohours_reset_at=getattr(car, "motohours_reset_at", None) if car else None))
 
 
 @router.get("/login", response_class=HTMLResponse)
