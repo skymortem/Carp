@@ -1,5 +1,7 @@
 import logging
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -25,8 +27,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Carp — Car Expense Tracker", lifespan=lifespan)
 
-# Статика
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+# Статика — создаём папку если нет
+static_dir = Path(__file__).resolve().parent / "static"
+static_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 # Роутеры
 app.include_router(auth.router)
