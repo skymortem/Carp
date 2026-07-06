@@ -1,0 +1,15 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+sqlalchemy[asyncio]>=2.0.35
+aiosqlite>=0.20.0
+alembic>=1.13.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+bcrypt>=5.0.0
+python-multipart>=0.0.12
+jinja2>=3.1.6
+httpx>=0.27.0
+pydantic-settings>=2.5.0
+python-dotenv>=1.0.1
+apscheduler>=3.10.4
+greenlet>=3.0.0
