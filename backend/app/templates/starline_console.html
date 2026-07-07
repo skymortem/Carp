@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}StarLine API Console — Carp{% endblock %}
+{% block content %}
+<div x-data="apiConsole()" class="max-w-4xl mx-auto">
+    <h1 class="text-2xl font-bold mb-2">📡 StarLine API Console</h1>
+    <p class="text-sm text-slate-400 mb-6">
+        Device ID: <code class="text-blue-400">{{ device_id }}</code>
+    </p>
+
+    <div class="card p-6 mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+                <label class="block text-sm text-slate-400 mb-1">Method</label>
+                <select x-model="method" class="input">
+                    <option value="GET">GET</option>
+                    <option value="POST">POST</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm text-slate-400 mb-1">Endpoint</label>
+                <input type="text" x-model="endpoint" class="input" 
+                       placeholder="/json/v3/device/{device_id}/data">
+            </div>
+        </div>
+
+        <div class="mb-4" x-show="method === 'POST'">
+            <label class="block text-sm text-slate-400 mb-1">Request body (JSON)</label>
+            <textarea x-model="body" class="input font-mono text-xs" rows="4"
+                      placeholder='{"key": "value"}'></textarea>
+        </div>
+
+        <button @click="send()" :disabled="loading"
+                class="btn-primary" x-text="loading ? 'Запрос...' : '🚀 Отправить'">
+        </button>
+    </div>
+
+    <!-- Результат -->
+    <div class="card p-6" x-show="response !== null" x-cloak>
+        <div class="flex items-center justify-between mb-2">
+            <h3 class="font-bold">Ответ</h3>
+            <span class="text-xs text-slate-500" x-text="'HTTP ' + statusCode"></span>
+        </div>
+        <pre class="bg-slate-900 rounded-lg p-4 text-xs font-mono overflow-x-auto"
+             x-text="JSON.stringify(response, null, 2)"></pre>
+    </div>
+
+    <!-- Быстрые ссылки -->
+    <div class="card p-6 mt-6">
+        <h3 class="font-bold mb-3">⚡ Быстрые запросы</h3>
+        <div class="flex flex-wrap gap-2">
+            <button @click="quick('GET', '/json/v2/device/{device_id}/state')" class="btn-secondary text-xs">State</button>
+            <button @click="quick('GET', '/json/v3/device/{device_id}/data')" class="btn-secondary text-xs">Full data</button>
+            <button @click="quickEvents()" class="btn-secondary text-xs">Events (24h)</button>
+            <button @click="quick('GET', '/json/v1/device/{device_id}/position')" class="btn-secondary text-xs">Position</button>
+            <button @click="quick('POST', '/json/v1/device/{device_id}/getObdData')" class="btn-secondary text-xs">OBD history</button>
+            <button @click="quick('GET', '/json/device/{device_id}/obd_params')" class="btn-secondary text-xs">OBD params</button>
+            <button @click="quick('GET', '/json/v2/device/{device_id}')" class="btn-secondary text-xs">Device summary</button>
+        </div>
+    </div>
+</div>
+
+<style>[x-cloak] { display: none !important; }</style>
+
+<script>
+function apiConsole() {
+    return {
+        method: 'GET',
+        endpoint: '/json/v3/device/{device_id}/data',
+        body: '{}',
+        loading: false,
+        response: null,
+        statusCode: '',
+        async send() {
+            this.loading = true;
+            this.response = null;
+            try {
+                const r = await fetch('/starline/api-raw', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        method: this.method,
+                        endpoint: this.endpoint,
+                        body: this.method === 'POST' ? JSON.parse(this.body || '{}') : {}
+                    })
+                });
+                this.statusCode = r.status;
+                this.response = await r.json();
+            } catch(e) {
+                this.response = {error: e.message};
+                this.statusCode = '0';
+            } finally {
+                this.loading = false;
+            }
+        },
+        quick(method, endpoint) {
+            this.method = method;
+            this.endpoint = endpoint;
+            this.body = '{}';
+            this.send();
+        },
+        quickEvents() {
+            const now = Math.floor(Date.now() / 1000);
+            const yesterday = now - 86400;
+            this.method = 'POST';
+            this.endpoint = '/json/v2/device/{device_id}/events';
+            this.body = JSON.stringify({period_start: yesterday, period_end: now}, null, 2);
+            this.send();
+        }
+    };
+}
+</script>
+{% endblock %}

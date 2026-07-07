@@ -10,12 +10,68 @@ from app.database import get_db
 from app.models.user import User
 from app.models.car import Car, StarSnap
 from app.services.auth import get_current_user_from_cookie
-from app.services.starline import StarLineClient, StarLineError
+from app.services.starline import StarLineClient, StarLineError, API_BASE
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/starline", tags=["starline"])
+
+
+class StarLineApiRequest(BaseModel):
+    """Запрос к тестовой консоли StarLine API."""
+    method: str = "GET"  # GET или POST
+    endpoint: str = ""   # например /json/v3/device/{device_id}/data
+    body: dict = {}
+
+
+@router.post("/api-raw")
+async def starline_api_raw(
+    req: StarLineApiRequest,
+    user: User = Depends(get_current_user_from_cookie),
+    db: AsyncSession = Depends(get_db),
+):
+    """Выполнить произвольный запрос к StarLine API (тестовая консоль)."""
+    try:
+        result = await db.execute(
+            select(Car).where(Car.user_id == user.id, Car.starline_device_id.isnot(None)).limit(1)
+        )
+        car = result.scalar_one_or_none()
+        if not car:
+            return {"error": "No StarLine car found. Connect first."}
+
+        # Подставляем device_id в endpoint
+        endpoint = req.endpoint.replace("{device_id}", car.starline_device_id)
+
+        from app.config import settings
+        client = StarLineClient(
+            settings.starline_app_id or "",
+            settings.starline_app_secret or "",
+            settings.starline_login or "",
+            settings.starline_password or "",
+        )
+        client.auth()
+
+        import httpx
+        url = f"{API_BASE}{endpoint}"
+        cookies = {"slnet": client._slnet_token}
+
+        if req.method.upper() == "GET":
+            resp = httpx.get(url, cookies=cookies, timeout=15)
+        elif req.method.upper() == "POST":
+            resp = httpx.post(url, cookies=cookies, json=req.body, timeout=15)
+        else:
+            return {"error": "Only GET/POST supported"}
+
+        try:
+            json_data = resp.json()
+            logger.info("api-raw %s %s → %s", req.method, endpoint, str(json_data)[:500])
+            return json_data
+        except Exception:
+            return {"raw": resp.text[:2000], "status": resp.status_code}
+
+    except Exception as e:
+        return {"error": str(e)}
 
 
 class StarLineConfig(BaseModel):
@@ -65,7 +121,7 @@ async def connect_to_starline(
 
             device = devices[0]
             device_id = device.get("device_id")
-            device_name = device.get("alias") or device.get("typename") or "Car"
+            device_name = device.get("name") or device.get("alias") or device.get("typename") or "Car"
 
             data = client.get_device_data(device_id)
             obd = data.get("obd") or {}
@@ -78,6 +134,7 @@ async def connect_to_starline(
 
         if car:
             car.starline_device_id = device_id
+            car.name = device_name  # обновляем имя при повторном подключении
         else:
             car = Car(
                 user_id=user.id,
@@ -164,6 +221,16 @@ async def fetch_data(
                 pos_data = client.get_last_position(car.starline_device_id)
             except Exception as e:
                 logger.warning("getPosition failed: %s", e)
+
+        # Если моточасы из state.motohrs не пришли — считаем через события
+        if snapshot["motohours_minutes"] is None:
+            try:
+                mh = client.get_engine_hours_from_events(car.starline_device_id, days=30)
+                snapshot["motohours_minutes"] = mh["motohours_minutes"]
+                logger.info("Motohours from events: %d min (on=%d, off=%d)",
+                    mh["motohours_minutes"], mh["ign_on_count"], mh["ign_off_count"])
+            except Exception as e:
+                logger.warning("getEngineHours failed: %s", e)
 
         snap = StarSnap(car_id=car.id, **snapshot)
         db.add(snap)

@@ -61,3 +61,27 @@ class StarSnap(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     car = relationship("Car", back_populates="snaps")
+
+
+class ServicePlan(Base):
+    """План ТО — регулярные операции по обслуживанию автомобиля."""
+    __tablename__ = "service_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    car_id = Column(Integer, ForeignKey("cars.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)  # название операции (например "Замена масла")
+
+    # Последнее выполнение
+    last_mileage_km = Column(Integer, nullable=True)  # пробег при последней замене
+    last_motohours = Column(Integer, nullable=True)   # моточасы при последней замене
+    last_date = Column(DateTime(timezone=True), nullable=True)  # дата последней замены
+
+    # Интервалы (хотя бы один должен быть указан)
+    interval_km = Column(Integer, nullable=True)          # км между заменами
+    interval_months = Column(Integer, nullable=True)      # месяцев между заменами
+    interval_motohours = Column(Integer, nullable=True)   # моточасов между заменами
+
+    notes = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    car = relationship("Car", backref="service_plans")

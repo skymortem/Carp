@@ -105,3 +105,19 @@ async def setup_page(
 ):
     """Страница настройки StarLine подключения."""
     return HTMLResponse(render("setup.html", request=request, user=user))
+
+
+@router.get("/starline-console", response_class=HTMLResponse)
+async def starline_console_page(
+    request: Request,
+    user: User = Depends(get_current_user_from_cookie),
+    db: AsyncSession = Depends(get_db),
+):
+    """Тестовая консоль StarLine API."""
+    from app.models.car import Car
+    result = await db.execute(
+        select(Car).where(Car.user_id == user.id, Car.starline_device_id.isnot(None)).limit(1)
+    )
+    car = result.scalar_one_or_none()
+    device_id = car.starline_device_id if car else "—"
+    return HTMLResponse(render("starline_console.html", request=request, user=user, device_id=device_id))

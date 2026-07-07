@@ -153,8 +153,8 @@ class StarLineClient:
         logger.info("getDeviceData position: %s", device_data.get("position"))
         if device_data.get("common"):
             logger.info("getDeviceData common: %s", device_data.get("common"))
-        if device_data.get("event"):
-            logger.info("getDeviceData event: %s", device_data.get("event"))
+        if device_data.get("state"):
+            logger.info("getDeviceData state: %s", device_data.get("state"))
         return device_data
 
     # ── Получение списка устройств пользователя ────────────────────
@@ -220,6 +220,51 @@ class StarLineClient:
         data = resp.json()
         logger.info("getObdData response: %s", data)
         return data
+
+    # ── Получение моточасов через события ──────────────────────────
+
+    def get_engine_hours_from_events(self, device_id: str, days: int = 7) -> dict:
+        """Вычислить моточасы по событиям запуска/остановки двигателя за N дней."""
+        if not self._slnet_token:
+            self.auth()
+        now = int(datetime.now().timestamp())
+        period_start = now - days * 86400
+
+        url = f"{API_BASE}/json/v2/device/{device_id}/events"
+        cookies = {"slnet": self._slnet_token}
+        payload = {"period_start": period_start, "period_end": now}
+        resp = httpx.post(url, cookies=cookies, json=payload, timeout=15)
+        data = resp.json()
+        logger.info("getEngineHours: %d events", len(data.get("events", [])))
+
+        events = data.get("events", [])
+        # Фильтруем только события двигателя (groupId=5, type=1037/1042)
+        ign_on_events = [e for e in events if e.get("type") == 1037]
+        ign_off_events = [e for e in events if e.get("type") == 1042]
+
+        # Сортируем по времени
+        all_engine = sorted(
+            [{"ts": e["timestamp"], "type": "on"} for e in ign_on_events] +
+            [{"ts": e["timestamp"], "type": "off"} for e in ign_off_events],
+            key=lambda x: x["ts"]
+        )
+
+        total_minutes = 0
+        start_ts = None
+
+        for entry in all_engine:
+            if entry["type"] == "on" and start_ts is None:
+                start_ts = entry["ts"]
+            elif entry["type"] == "off" and start_ts is not None:
+                total_minutes += (entry["ts"] - start_ts) // 60
+                start_ts = None
+
+        return {
+            "motohours_minutes": total_minutes,
+            "ign_on_count": len(ign_on_events),
+            "ign_off_count": len(ign_off_events),
+            "period_days": days,
+        }
 
     # ── Метод-хелп: распарсить сниппет ─────────────────────────────
 
