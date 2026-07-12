@@ -9,9 +9,6 @@
         </h1>
         <div class="flex gap-2">
             {% if starline_connected %}
-                <button @click="resetMotohours()" class="btn-secondary text-sm"
-                        x-text="resetting ? 'Сброс...' : '⏱ Сбросить моточасы'">
-                </button>
                 <button @click="fetchStarLine()" :disabled="loading"
                         class="btn-primary text-sm" x-text="loading ? 'Загрузка...' : '🔄 Собрать сейчас'">
                 </button>
@@ -20,7 +17,7 @@
     </div>
 
     <!-- Индикаторы -->
-    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
         <div class="card p-4">
             <div class="text-sm text-slate-400">Пробег</div>
             <div class="text-2xl font-bold" x-text="latest?.mileage_km ? latest.mileage_km.toLocaleString() + ' км' : '—'"></div>
@@ -28,10 +25,6 @@
         <div class="card p-4">
             <div class="text-sm text-slate-400">Топливо в баке</div>
             <div class="text-2xl font-bold" x-text="latest?.fuel_litres ? latest.fuel_litres + ' л' : '—'"></div>
-        </div>
-        <div class="card p-4">
-            <div class="text-sm text-slate-400">Скорость</div>
-            <div class="text-2xl font-bold" x-text="latest?.speed_kmh ? latest.speed_kmh + ' км/ч' : '—'"></div>
         </div>
         <div class="card p-4">
             <div class="text-sm text-slate-400">Двигатель</div>
@@ -55,16 +48,27 @@
     </div>
     {% endif %}
 
-    <!-- График пробега -->
+    <!-- График пробега по месяцам -->
     {% if snaps_reversed|length > 1 %}
     <div class="card p-6 mb-6">
-        <h3 class="font-bold mb-4">📈 Пробег (км)</h3>
-        <canvas id="mileageChart" height="80"></canvas>
+        <h3 class="font-bold mb-4">📈 Пробег по месяцам (км)</h3>
+        <canvas id="mileageChart" height="100"></canvas>
     </div>
+    {% endif %}
 
+    <!-- План ТО -->
+    {% if service_plans %}
     <div class="card p-6 mb-6">
-        <h3 class="font-bold mb-4">⛽ Уровень топлива (л)</h3>
-        <canvas id="fuelChart" height="80"></canvas>
+        <h3 class="font-bold mb-4">🔧 Ближайшее ТО</h3>
+        <div class="space-y-2">
+            {% for p in service_plans %}
+            <div class="flex items-center justify-between py-2 px-3 rounded-lg {% if p.urgent %}bg-red-900/30 border border-red-700/50{% else %}bg-slate-800/30{% endif %}">
+                <span class="font-medium">{{ p.name }}</span>
+                <span class="text-sm {% if p.urgent %}text-red-400 font-bold{% else %}text-slate-400{% endif %}">{{ p.remain }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        <a href="/service-plan/page" class="text-sm text-blue-400 mt-3 inline-block hover:text-blue-300">Управлять списком →</a>
     </div>
     {% endif %}
 
@@ -99,7 +103,6 @@
     </div>
     {% endif %}
 </div>
-
 {% endblock %}
 
 {% block scripts %}
@@ -111,7 +114,6 @@
     function dashboard() {
         return {
             loading: false,
-            resetting: false,
             latest: snaps.length > 0 ? snaps[snaps.length - 1] : null,
             get motohoursDisplay() {
                 const m = this.latest?.motohours_minutes;
@@ -132,78 +134,53 @@
                 } catch(e) { alert('Ошибка сети: ' + e); }
                 finally { this.loading = false; }
             },
-            async resetMotohours() {
-                if (!confirm('Сбросить счётчик моточасов? Текущие моточасы станут точкой отсчёта.')) return;
-                this.resetting = true;
-                try {
-                    const r = await fetch('/starline/reset-motohours', {method:'POST'});
-                    const d = await r.json();
-                    if (d.ok) location.reload();
-                    else alert('Ошибка: ' + (d.detail || 'неизвестно'));
-                } catch(e) { alert('Ошибка сети: ' + e); }
-                finally { this.resetting = false; }
-            }
         };
     }
 
     document.addEventListener('DOMContentLoaded', function() {
-        // График пробега
+        // График пробега по месяцам
         const mileCtx = document.getElementById('mileageChart');
         if (mileCtx) {
-            const labels = snaps.map(s => new Date(s.ts).toLocaleDateString('ru', {day:'numeric', month:'short', hour:'2-digit'}));
-            const mileData = snaps.map(s => s.mileage_km).filter(v => v !== null);
-            const fuelData = snaps.map(s => s.fuel_litres).filter(v => v !== null);
-            const mileLabels = snaps.filter(s => s.mileage_km !== null).map(s => new Date(s.ts).toLocaleDateString('ru', {day:'numeric', month:'short'}));
+            // Группируем снепшоты по месяцам
+            const monthMap = {};
+            for (const s of snaps) {
+                if (s.mileage_km === null) continue;
+                const d = new Date(s.ts);
+                const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+                if (!monthMap[key]) monthMap[key] = {first: s.mileage_km, last: s.mileage_km};
+                else monthMap[key].last = s.mileage_km;
+            }
+            // Считаем пробег за месяц = max - min
+            const labels = [], data = [];
+            const sorted = Object.entries(monthMap).sort((a, b) => a[0].localeCompare(b[0]));
+            for (const [key, val] of sorted) {
+                const [y, m] = key.split('-');
+                const months = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+                labels.push(months[parseInt(m) - 1] + ' ' + y);
+                data.push(val.last - val.first);
+            }
 
             new Chart(mileCtx, {
-                type: 'line',
+                type: 'bar',
                 data: {
-                    labels: mileLabels,
+                    labels: labels,
                     datasets: [{
                         label: 'Пробег (км)',
-                        data: mileData,
+                        data: data,
+                        backgroundColor: 'rgba(59,130,246,0.7)',
                         borderColor: '#3b82f6',
-                        backgroundColor: 'rgba(59,130,246,0.1)',
-                        fill: true,
-                        tension: 0.3,
-                        pointRadius: 2,
+                        borderWidth: 1,
+                        borderRadius: 4,
                     }]
                 },
                 options: {
                     responsive: true,
-                    plugins: { legend: { labels: { color: '#94a3b8' } } },
+                    plugins: {
+                        legend: { labels: { color: '#94a3b8' } },
+                    },
                     scales: {
-                        x: { ticks: { color: '#64748b', maxTicksLimit: 10 } },
-                        y: { ticks: { color: '#64748b' } }
-                    }
-                }
-            });
-        }
-
-        // График топлива
-        const fuelCtx = document.getElementById('fuelChart');
-        if (fuelCtx && fuelData) {
-            const fuelLabels = snaps.filter(s => s.fuel_litres !== null).map(s => new Date(s.ts).toLocaleDateString('ru', {day:'numeric', month:'short'}));
-            new Chart(fuelCtx, {
-                type: 'line',
-                data: {
-                    labels: fuelLabels,
-                    datasets: [{
-                        label: 'Топливо (л)',
-                        data: fuelData,
-                        borderColor: '#22c55e',
-                        backgroundColor: 'rgba(34,197,94,0.1)',
-                        fill: true,
-                        tension: 0.3,
-                        pointRadius: 2,
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    plugins: { legend: { labels: { color: '#94a3b8' } } },
-                    scales: {
-                        x: { ticks: { color: '#64748b', maxTicksLimit: 10 } },
-                        y: { ticks: { color: '#64748b' } }
+                        x: { ticks: { color: '#64748b' } },
+                        y: { ticks: { color: '#64748b', beginAtZero: true } }
                     }
                 }
             });
