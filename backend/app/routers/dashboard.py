@@ -47,6 +47,7 @@ async def dashboard_page(
 
     snaps = []
     snaps_reversed = []
+    service_plans = []
     starline_connected = False
 
     if car:
