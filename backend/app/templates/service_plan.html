@@ -43,6 +43,40 @@
         <div class="mt-2 text-sm" x-text="message" :class="error ? 'text-red-400' : 'text-green-400'"></div>
     </div>
 
+    <!-- Модалка: редактирование операции -->
+    <div x-show="editForm.show" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" x-cloak @click.away="editForm.show = false">
+        <div class="card p-6 w-full max-w-lg mx-4">
+            <h3 class="font-bold mb-4">✎ Редактировать операцию</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div class="md:col-span-2">
+                    <label class="block text-sm text-slate-400 mb-1">Название</label>
+                    <input type="text" x-model="editForm.name" class="input" placeholder="Замена масла">
+                </div>
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">Интервал (км)</label>
+                    <input type="number" x-model="editForm.interval_km" class="input" placeholder="10000">
+                </div>
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">Интервал (мес)</label>
+                    <input type="number" x-model="editForm.interval_months" class="input" placeholder="12">
+                </div>
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">Интервал (моточасы)</label>
+                    <input type="number" x-model="editForm.interval_motohours" class="input" placeholder="250">
+                </div>
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">Заметки</label>
+                    <input type="text" x-model="editForm.notes" class="input" placeholder="Масло 5W-30">
+                </div>
+            </div>
+            <div class="flex gap-2">
+                <button @click="submitEdit()" class="btn-primary" x-text="editForm.loading ? 'Сохранение...' : '💾 Сохранить'"></button>
+                <button @click="editForm.show = false" class="btn-secondary">Отмена</button>
+            </div>
+            <div class="mt-2 text-sm" x-text="editForm.msg" :class="editForm.err ? 'text-red-400' : 'text-green-400'"></div>
+        </div>
+    </div>
+
     <!-- Модалка: Пройти ТО -->
     <div x-show="showComplete" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" x-cloak @click.away="showComplete = false">
         <div class="card p-6 w-full max-w-lg mx-4 max-h-[80vh] overflow-y-auto">
@@ -102,7 +136,7 @@
                     Интервал:
                     {% if p.interval_km %}{{ p.interval_km }} км · {% endif %}
                     {% if p.interval_months %}{{ p.interval_months }} мес · {% endif %}
-                    {% if p.interval_motohours %}{{ p.interval_motohours // 60 }} ч{% endif %}
+                    {% if p.interval_motohours %}{{ p.interval_motohours }} ч{% endif %}
                     {% if not p.interval_km and not p.interval_months and not p.interval_motohours %}не задан{% endif %}
                 </div>
                 {% if p.overdue %}
@@ -114,7 +148,8 @@
                 <div class="text-xs text-slate-500 mt-1">{{ p.notes }}</div>
                 {% endif %}
             </div>
-            <div class="ml-4 shrink-0">
+            <div class="ml-4 shrink-0 flex gap-2">
+                <button @click="edit($el.dataset)" :data-id="{{ p.id }}" :data-name="'{{ p.name|e }}'" data-interval_km="{{ p.interval_km or '' }}" data-interval_months="{{ p.interval_months or '' }}" data-interval_motohours="{{ p.interval_motohours or '' }}" :data-notes="'{{ p.notes|e|default('') }}'" class="text-slate-400 text-sm hover:text-white">✎</button>
                 <button @click="remove({{ p.id }})" class="text-red-400 text-sm hover:text-red-300">✕</button>
             </div>
         </div>
@@ -129,7 +164,34 @@
     {% endif %}
 </div>
 
-<style>[x-cloak] { display: none !important; }</style>
+<!-- История выполненных ТО -->
+<div class="mt-6" x-data="serviceHistory()">
+    <div class="card p-6">
+        <h3 class="font-bold mb-4">📜 История ТО</h3>
+        <div x-show="!loaded" class="text-sm text-slate-400">Загрузка...</div>
+        <div x-show="loaded && history.length === 0" class="text-sm text-slate-500">Пока нет выполненных ТО.</div>
+        <div x-show="loaded && history.length > 0" class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-slate-400 border-b border-slate-700">
+                        <th class="text-left py-2">Дата</th>
+                        <th class="text-left py-2">Операция</th>
+                        <th class="text-right py-2">Пробег</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="h in history" :key="h.id">
+                        <tr class="border-b border-slate-800">
+                            <td class="py-2" x-text="h.done_at"></td>
+                            <td class="py-2" x-text="h.plan_name"></td>
+                            <td class="py-2 text-right" x-text="h.mileage_km ? h.mileage_km + ' км' : '—'"></td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
 
 <script>
 function servicePlan() {
@@ -139,6 +201,7 @@ function servicePlan() {
         message: '',
         error: false,
         form: { name: '', interval_km: null, interval_months: null, interval_motohours: null, notes: '' },
+        editForm: { show: false, id: null, name: '', interval_km: null, interval_months: null, interval_motohours: null, notes: '', loading: false, msg: '', err: false },
         complete: { ids: [], mileage_km: null, motohours: null, date: '', loading: false, msg: '', err: false },
         async save() {
             this.message = ''; this.error = false;
@@ -176,7 +239,48 @@ function servicePlan() {
             const d = await r.json();
             if (d.ok) location.reload();
         },
+        edit(data) {
+            this.editForm.id = parseInt(data.id);
+            this.editForm.name = data.name;
+            this.editForm.interval_km = data.interval_km !== '' ? parseInt(data.interval_km) : null;
+            this.editForm.interval_months = data.interval_months !== '' ? parseInt(data.interval_months) : null;
+            this.editForm.interval_motohours = data.interval_motohours !== '' ? parseInt(data.interval_motohours) : null;
+            this.editForm.notes = data.notes || '';
+            this.editForm.show = true;
+            this.editForm.msg = '';
+        },
+        async submitEdit() {
+            this.editForm.loading = true; this.editForm.msg = ''; this.editForm.err = false;
+            try {
+                const r = await fetch('/service-plan/update/' + this.editForm.id, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        name: this.editForm.name,
+                        interval_km: this.editForm.interval_km || null,
+                        interval_months: this.editForm.interval_months || null,
+                        interval_motohours: this.editForm.interval_motohours || null,
+                        notes: this.editForm.notes || '',
+                    })
+                });
+                const d = await r.json();
+                if (d.ok) location.reload();
+                else { this.editForm.err = true; this.editForm.msg = d.detail; }
+            } catch(e) { this.editForm.err = true; this.editForm.msg = 'Ошибка сети: ' + e; }
+            finally { this.editForm.loading = false; }
+        },
+    };
+}
+
+function serviceHistory() {
+    return {
+        history: [],
+        loaded: false,
+        init() {
+            fetch('/service-plan/history').then(r=>r.json()).then(d=>{ this.history = d; this.loaded = true; });
+        },
     };
 }
 </script>
+<style>[x-cloak] { display: none !important; }</style>
 {% endblock %}

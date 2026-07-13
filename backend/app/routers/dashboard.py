@@ -117,11 +117,12 @@ async def dashboard_page(
 
             if p.interval_motohours and p.last_motohours is not None:
                 if current_mh:
-                    mh_left = p.last_motohours + p.interval_motohours - current_mh
+                    interval_minutes = p.interval_motohours * 60
+                    mh_left = p.last_motohours + interval_minutes - current_mh
                     h_left = mh_left // 60
                     label = f"{h_left} ч" if mh_left > 0 else "⚠️ Просрочено!"
                     remain.append(label)
-                    if mh_left < 50 * 60:  # 50 моточасов
+                    if mh_left < 50 * 60:
                         urgent = True
 
             service_plans.append({

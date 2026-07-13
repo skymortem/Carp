@@ -85,3 +85,16 @@ class ServicePlan(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     car = relationship("Car", backref="service_plans")
+
+
+class ServiceLog(Base):
+    """История выполненных ТО."""
+    __tablename__ = "service_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    car_id = Column(Integer, ForeignKey("cars.id"), nullable=False, index=True)
+    plan_id = Column(Integer, ForeignKey("service_plans.id"), nullable=True)
+    plan_name = Column(String, nullable=False)  # название операции на момент выполнения
+    mileage_km = Column(Integer, nullable=True)  # пробег при ТО
+    motohours = Column(Integer, nullable=True)   # моточасы при ТО
+    done_at = Column(DateTime(timezone=True), server_default=func.now())  # дата выполнения

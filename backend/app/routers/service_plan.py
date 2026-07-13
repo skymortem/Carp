@@ -25,6 +25,14 @@ class ServicePlanForm(BaseModel):
     notes: Optional[str] = None
 
 
+class PlanUpdateForm(BaseModel):
+    name: Optional[str] = None
+    interval_km: Optional[int] = None
+    interval_months: Optional[int] = None
+    interval_motohours: Optional[int] = None
+    notes: Optional[str] = None
+
+
 class CompleteForm(BaseModel):
     plan_ids: list[int]
     mileage_km: Optional[int] = None
@@ -61,6 +69,29 @@ async def add_plan(
     return {"ok": True, "id": plan.id}
 
 
+@router.put("/update/{plan_id}")
+async def update_plan(
+    plan_id: int,
+    body: PlanUpdateForm,
+    user: User = Depends(get_current_user_from_cookie),
+    db: AsyncSession = Depends(get_db),
+):
+    """Редактировать шаблон операции ТО."""
+    car = await get_car(user, db)
+    result = await db.execute(
+        select(ServicePlan).where(ServicePlan.id == plan_id, ServicePlan.car_id == car.id)
+    )
+    plan = result.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+
+    data = body.model_dump(exclude_none=True)
+    for key, val in data.items():
+        setattr(plan, key, val)
+    await db.commit()
+    return {"ok": True}
+
+
 @router.post("/complete")
 async def complete_plans(
     body: CompleteForm,
@@ -71,9 +102,13 @@ async def complete_plans(
     car = await get_car(user, db)
     snap = await get_latest_snap(car.id, db)
 
-    # Данные для простановки: приоритет — из запроса, затем — из последнего снепшота, затем — сегодня/0
+    # Данные для простановки
     set_km = body.mileage_km if body.mileage_km is not None else (snap.mileage_km if snap else 0)
-    set_mh = body.motohours if body.motohours is not None else (snap.motohours_minutes if snap else 0)
+    # ВАЖНО: моточасы хранятся в минутах, пользователь вводит в часах — конвертируем
+    if body.motohours is not None:
+        set_mh = body.motohours * 60
+    else:
+        set_mh = snap.motohours_minutes if snap else 0
     if body.date:
         try:
             set_date = datetime.strptime(body.date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -94,6 +129,14 @@ async def complete_plans(
         plan.last_motohours = set_mh
         plan.last_date = set_date
         updated.append(pid)
+
+        # Запись в историю
+        from app.models.car import ServiceLog
+        log = ServiceLog(
+            car_id=car.id, plan_id=plan.id, plan_name=plan.name,
+            mileage_km=set_km, motohours=set_mh, done_at=set_date,
+        )
+        db.add(log)
 
     await db.commit()
     return {"ok": True, "updated": updated}
@@ -156,9 +199,10 @@ async def service_plan_page(
         if p.interval_motohours and p.last_motohours is not None:
             active = True
             if current_mh:
-                mh_left = p.last_motohours + p.interval_motohours - current_mh
-                h_left = mh_left // 60
-                status.append(f"{h_left} ч" if mh_left > 0 else "⚠️ Просрочено!")
+                # interval_motohours в часах, last_motohours и current_mh в минутах
+                interval_minutes = p.interval_motohours * 60
+                mh_left = p.last_motohours + interval_minutes - current_mh
+                status.append(f"{mh_left // 60} ч" if mh_left > 0 else "⚠️ Просрочено!")
                 if mh_left <= 0:
                     overdue = True
 
@@ -178,6 +222,29 @@ async def service_plan_page(
     return HTMLResponse(render_template("service_plan.html", request=request,
         user=user, car=car, plans=plans_data,
         current_km=current_km, current_mh=current_mh))
+
+
+@router.get("/history")
+async def get_history(
+    user: User = Depends(get_current_user_from_cookie),
+    db: AsyncSession = Depends(get_db),
+):
+    """API: история выполненных ТО."""
+    car = await get_car(user, db)
+    from app.models.car import ServiceLog
+    result = await db.execute(
+        select(ServiceLog).where(ServiceLog.car_id == car.id).order_by(desc(ServiceLog.done_at)).limit(50)
+    )
+    logs = result.scalars().all()
+    return [
+        {
+            "id": log.id,
+            "plan_name": log.plan_name,
+            "mileage_km": log.mileage_km,
+            "done_at": log.done_at.strftime("%d.%m.%Y") if log.done_at else "—",
+        }
+        for log in logs
+    ]
 
 
 def render_template(name: str, request: Request, **context) -> str:
