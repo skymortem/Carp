@@ -4,20 +4,20 @@
 <div x-data="servicePlan()">
     <div class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-bold">🔧 План ТО</h1>
-        <button @click="showForm = true" class="btn-primary text-sm">+ Добавить операцию</button>
+        <div class="flex gap-2">
+            <button @click="showComplete = true" class="btn-primary text-sm">✅ Пройти ТО</button>
+            <button @click="showForm = true" class="btn-secondary text-sm">+ Добавить операцию</button>
+        </div>
     </div>
 
-    <!-- Форма добавления -->
+    <!-- Форма добавления операции (только шаблон) -->
     <div x-show="showForm" class="card p-6 mb-6" x-cloak>
         <h3 class="font-bold mb-4">Новая операция ТО</h3>
+        <p class="text-sm text-slate-400 mb-4">Создай шаблон операции. После прохождения ТО начнётся отсчёт до следующего.</p>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <div>
                 <label class="block text-sm text-slate-400 mb-1">Название операции</label>
                 <input type="text" x-model="form.name" class="input" placeholder="Замена масла">
-            </div>
-            <div>
-                <label class="block text-sm text-slate-400 mb-1">Дата последней замены</label>
-                <input type="date" x-model="form.last_date" class="input">
             </div>
             <div>
                 <label class="block text-sm text-slate-400 mb-1">Интервал (км)</label>
@@ -43,35 +43,78 @@
         <div class="mt-2 text-sm" x-text="message" :class="error ? 'text-red-400' : 'text-green-400'"></div>
     </div>
 
+    <!-- Модалка: Пройти ТО -->
+    <div x-show="showComplete" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" x-cloak @click.away="showComplete = false">
+        <div class="card p-6 w-full max-w-lg mx-4 max-h-[80vh] overflow-y-auto">
+            <h3 class="font-bold mb-2 text-lg">✅ Пройти ТО</h3>
+            <p class="text-sm text-slate-400 mb-4">Выбери операции и укажи пробег/моточасы/дату (оставь пустым — подставится текущее).</p>
+
+            <div class="mb-4 space-y-2 max-h-40 overflow-y-auto">
+                {% for p in plans %}
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" x-model="complete.ids" value="{{ p.id }}" class="accent-blue-500">
+                    <span class="text-sm">{{ p.name }}</span>
+                </label>
+                {% else %}
+                <p class="text-sm text-slate-500">Нет операций. Сначала добавь.</p>
+                {% endfor %}
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Пробег (км)</label>
+                    <input type="number" x-model="complete.mileage_km" class="input text-sm" placeholder="Текущий">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Моточасы</label>
+                    <input type="number" x-model="complete.motohours" class="input text-sm" placeholder="Текущие">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Дата</label>
+                    <input type="date" x-model="complete.date" class="input text-sm">
+                </div>
+            </div>
+
+            <div class="flex gap-2">
+                <button @click="submitComplete()" :disabled="complete.loading" class="btn-primary"
+                        x-text="complete.loading ? 'Сохранение...' : '💾 Сохранить'"></button>
+                <button @click="showComplete = false" class="btn-secondary">Отмена</button>
+            </div>
+            <div class="mt-2 text-sm" x-text="complete.msg" :class="complete.err ? 'text-red-400' : 'text-green-400'"></div>
+        </div>
+    </div>
+
     <!-- Список операций -->
     {% if plans %}
     <div class="space-y-3">
         {% for p in plans %}
-        <div class="card p-4 flex items-center justify-between" :class="'{{ 'border-l-4 border-l-red-500' if p.overdue else '' }}'">
+        <div class="card p-4 flex items-center justify-between {% if p.overdue %}border-l-4 border-l-red-500{% elif not p.active %}border-l-4 border-l-slate-600{% endif %}">
             <div class="flex-1">
                 <div class="font-bold">{{ p.name }}</div>
                 <div class="text-sm text-slate-400 mt-1">
-                    Последняя: пробег {{ p.last_mileage_km|default('—', true) }} км ·
-                    {{ p.last_date }} ·
-                    {{ p.last_motohours|default('—', true) }} м/ч
+                    {% if p.active %}
+                    Последнее ТО: {{ p.last_info }}
+                    {% else %}
+                    <span class="text-slate-500">Не проводилось</span>
+                    {% endif %}
                 </div>
                 <div class="text-sm mt-1">
                     Интервал:
                     {% if p.interval_km %}{{ p.interval_km }} км · {% endif %}
                     {% if p.interval_months %}{{ p.interval_months }} мес · {% endif %}
                     {% if p.interval_motohours %}{{ p.interval_motohours // 60 }} ч{% endif %}
+                    {% if not p.interval_km and not p.interval_months and not p.interval_motohours %}не задан{% endif %}
                 </div>
                 {% if p.overdue %}
                 <div class="text-sm text-red-400 font-bold mt-1">⚠️ {{ p.status }}</div>
-                {% else %}
+                {% elif p.active %}
                 <div class="text-sm text-slate-500 mt-1">Осталось: {{ p.status }}</div>
                 {% endif %}
                 {% if p.notes %}
                 <div class="text-xs text-slate-500 mt-1">{{ p.notes }}</div>
                 {% endif %}
             </div>
-            <div class="flex gap-2 ml-4 shrink-0">
-                <button @click="markDone({{ p.id }})" class="btn-secondary text-xs">✅ Выполнено</button>
+            <div class="ml-4 shrink-0">
                 <button @click="remove({{ p.id }})" class="text-red-400 text-sm hover:text-red-300">✕</button>
             </div>
         </div>
@@ -81,7 +124,7 @@
     <div class="card p-8 text-center">
         <div class="text-4xl mb-3">🔧</div>
         <h2 class="text-xl font-bold mb-2">План ТО пуст</h2>
-        <p class="text-slate-400">Добавь операции по обслуживанию — будем напоминать когда пора!</p>
+        <p class="text-slate-400">Добавь операции по обслуживанию — после прохождения будем напоминать когда пора!</p>
     </div>
     {% endif %}
 </div>
@@ -92,23 +135,16 @@
 function servicePlan() {
     return {
         showForm: false,
+        showComplete: false,
         message: '',
         error: false,
-        form: {
-            name: '',
-            last_date: '',
-            interval_km: null,
-            interval_months: null,
-            interval_motohours: null,
-            notes: '',
-        },
+        form: { name: '', interval_km: null, interval_months: null, interval_motohours: null, notes: '' },
+        complete: { ids: [], mileage_km: null, motohours: null, date: '', loading: false, msg: '', err: false },
         async save() {
-            this.message = '';
-            this.error = false;
+            this.message = ''; this.error = false;
             try {
                 const r = await fetch('/service-plan/add', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(this.form)
                 });
                 const d = await r.json();
@@ -116,10 +152,23 @@ function servicePlan() {
                 else { this.error = true; this.message = d.detail; }
             } catch(e) { this.error = true; this.message = 'Ошибка сети: ' + e; }
         },
-        async markDone(id) {
-            const r = await fetch('/service-plan/done/' + id, {method:'POST'});
-            const d = await r.json();
-            if (d.ok) location.reload();
+        async submitComplete() {
+            this.complete.loading = true; this.complete.msg = ''; this.complete.err = false;
+            try {
+                const r = await fetch('/service-plan/complete', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        plan_ids: this.complete.ids,
+                        mileage_km: this.complete.mileage_km || null,
+                        motohours: this.complete.motohours || null,
+                        date: this.complete.date || null,
+                    })
+                });
+                const d = await r.json();
+                if (d.ok) location.reload();
+                else { this.complete.err = true; this.complete.msg = d.detail; }
+            } catch(e) { this.complete.err = true; this.complete.msg = 'Ошибка сети: ' + e; }
+            finally { this.complete.loading = false; }
         },
         async remove(id) {
             if (!confirm('Удалить операцию?')) return;
