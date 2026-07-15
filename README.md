@@ -1,116 +1,118 @@
-
-
 # Carp 🚗
 
-**Carp** is a self-hosted web application for tracking car expenses, mileage, fuel consumption, and engine hours — with **automatic data collection** via StarLine GSM alarm systems.
+**Carp** — это self-hosted веб-приложение для учёта расходов на автомобиль, отслеживания пробега, расхода топлива и моточасов — с **автоматическим сбором данных** через GSM-сигнализации StarLine.
 
-Instead of manually punching numbers into a spreadsheet, Carp fetches real telemetry from your car's CAN bus through the StarLine API, stores it, and visualizes it on a dashboard.
-
----
-
-## ✨ Features
-
-### ✅ Currently Working
-
-- **🔐 User authentication** — register/login with JWT stored in cookies
-- **📡 StarLine integration** — full OAuth2-like auth flow with SLID + WebAPI
-- **🚘 Auto device discovery** — finds your StarLine device by WebAPI user ID
-- **⛽ Fuel level tracking** — live fuel litres from CAN bus (`obd.fuel_litres`)
-- **📏 Mileage tracking** — odometer from CAN bus (`obd.mileage`) *when engine is running*
-- **🧭 GPS position** — coordinates, speed, movement status
-- **🔋 Vehicle state** — battery voltage, cabin/engine temperature, GSM signal, ignition status
-- **⏱ Engine hours counter** — tracks `state.motohrs`, resettable for oil change intervals
-- **📊 Dashboard** — dark-themed UI with real-time cards + Chart.js graphs
-- **🌐 HTMX + Alpine.js** — SPA-like experience without a heavy frontend framework
-
-### 🗺 Planned
-
-- **⏰ Automatic hourly collection** — cron/APScheduler to fetch StarLine data periodically
-- **⛽ Fuel fill detection** — auto-detect refuels from fuel level jumps between snapshots
-- **🔧 Service scheduler** — track oil changes, filters, spark plugs, timing belt intervals based on mileage or engine hours
-- **💰 Manual expense log** — add repairs, insurance, taxes, parking, washes
-- **🚘 Multiple cars** — support for a garage of vehicles
-- **📈 Advanced reports** — cost per km/month, fuel efficiency over time, driving score
-- **🔔 Notifications** — Telegram / email alerts for upcoming maintenance
-- **🐳 Docker** — one-command deploy with prebuilt image
+Carp сам забирает телеметрию с CAN-шины автомобиля через StarLine API, сохраняет и визуализирует на дашборде.
 
 ---
 
-## 🏗 Tech Stack
+## ✨ Возможности
 
-| Layer | Technology |
-|-------|-----------|
-| **Backend** | Python 3.11+, FastAPI, SQLAlchemy (async), SQLite |
-| **Frontend** | Jinja2 templates, Tailwind CSS, HTMX 2.x, Alpine.js 3.x |
-| **Charts** | Chart.js 4.x |
-| **Auth** | JWT (python-jose) + bcrypt |
-| **External API** | StarLine (SLID + WebAPI via httpx) |
-| **Migrations** | Alembic (planned) |
+### ✅ Уже работает
+
+- **🔐 Аутентификация** — регистрация/вход с JWT в куке
+- **📡 Интеграция со StarLine** — полный OAuth2-подобный цикл авторизации (SLID + WebAPI)
+- **🚘 Автопоиск устройства** — находит твою сигнализацию по WebAPI user_id
+- **⛽ Уровень топлива** — литры в баке с CAN-шины (`obd.fuel_litres`)
+- **📏 Пробег** — одометр с CAN-шины (`obd.mileage`) *когда двигатель заведён*
+- **🧭 GPS-позиция** — координаты, скорость, статус движения
+- **🔋 Состояние авто** — напряжение АКБ, температура салона/двигателя, уровень GSM, зажигание
+- **⏱ Счётчик моточасов** — отслеживание `state.motohrs`
+- **🔧 План ТО** — операции по обслуживанию с интервалами (км/месяцы/моточасы), автообновление пробега при отметке «Выполнено»
+- **📊 Дашборд** — тёмная тема, карточки в реальном времени + графики Chart.js
+- **🌐 HTMX + Alpine.js** — SPA-подобный интерфейс без тяжёлого фронтенда
+- **⏰ Автосбор раз в час** — APScheduler в фоне собирает данные
+
+### 🗺 В планах
+
+- **⛽ Автодетект заправок** — определять заправки по скачкам уровня топлива между сниппетами
+- **💰 Ручной ввод расходов** — ремонты, страховка, налоги, парковки, мойки
+- **🚘 Несколько машин** — поддержка гаража
+- **📈 Продвинутые отчёты** — стоимость км/месяц, эффективность топлива, стиль вождения
+- **🔔 Уведомления** — Telegram / email о приближающемся ТО
+- **🐳 Docker** — деплой одной командой
 
 ---
 
-## 🚀 Quick Start
+## 🏗 Стек технологий
+
+| Слой | Технология |
+|------|-----------|
+| **Бэкенд** | Python 3.11+, FastAPI, SQLAlchemy (async), SQLite |
+| **Фронтенд** | Jinja2, Tailwind CSS, HTMX 2.x, Alpine.js 3.x |
+| **Графики** | Chart.js 4.x |
+| **Аутентификация** | JWT (python-jose) + bcrypt |
+| **Внешнее API** | StarLine (SLID + WebAPI через httpx) |
+| **Планировщик** | APScheduler (сбор данных каждый час) |
+| **Миграции** | Alembic (планируется) |
+
+---
+
+## 🚀 Быстрый старт
 
 ```bash
-# Clone
-git clone https://github.com/skymortem/carp.git
+# Клонирование
+git clone https://github.com/yourname/carp.git
 cd carp/backend
 
-# Virtual environment
+# Виртуальное окружение
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt  # or: pip install fastapi uvicorn sqlalchemy aiosqlite ...
+pip install -r requirements.txt
 
-# Config
+# Настройка
 cp .env.example .env
-# Fill in: STARLINE_APP_ID, STARLINE_APP_SECRET, STARLINE_LOGIN, STARLINE_PASSWORD
+# Заполни: STARLINE_APP_ID, STARLINE_APP_SECRET, STARLINE_LOGIN, STARLINE_PASSWORD
+# Сгенерируй SECRET_KEY: python3 -c "import secrets; print(secrets.token_hex(32))"
 
-# Run
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+# Запуск
+PYTHONPATH="" uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Open **http://localhost:8000**, register, and head to the setup page to connect your StarLine account.
+Открой **http://localhost:8000**, зарегистрируйся и перейди в настройки, чтобы подключить свой StarLine аккаунт.
 
 ---
 
-## 📡 StarLine Integration
+## 📡 Интеграция со StarLine
 
-Carp performs a multi-step authentication with StarLine:
+Carp выполняет многошаговую авторизацию:
 
-1. **App code** — `GET id.starline.ru/apiV3/application/getCode`
-2. **App token** — `GET id.starline.ru/apiV3/application/getToken` (4h lifetime)
-3. **User token** — `POST id.starline.ru/apiV3/user/login` (1yr lifetime)
-4. **SLNet token** — `POST developer.starline.ru/json/v2/auth.slid` → cookie (24h)
+1. **Код приложения** — `GET id.starline.ru/apiV3/application/getCode`
+2. **Токен приложения** — `GET id.starline.ru/apiV3/application/getToken` (живёт 4ч)
+3. **Токен пользователя** — `POST id.starline.ru/apiV3/user/login` (живёт 1 год)
+4. **SLNet токен** — `POST developer.starline.ru/json/v2/auth.slid` → cookie (живёт 24ч)
 
-Once authenticated, Carp queries `GET /json/v3/device/{id}/data` for telemetry.
+После авторизации Carp запрашивает данные через `GET /json/v3/device/{id}/data`.
 
-> ⚠️ **Note:** The WebAPI user ID (from step 4) **differs** from the SLID user ID. Carp handles this transparently.
+> ⚠️ **Важно:** WebAPI user_id (из шага 4) **отличается** от SLID user_id. Carp обрабатывает это автоматически.
 
 ---
 
-## 🗂 Project Structure
+## 🗂 Структура проекта
 
 ```
 backend/
 ├── app/
-│   ├── main.py              # FastAPI app entrypoint
-│   ├── config.py            # Pydantic settings (reads .env)
+│   ├── main.py              # Точка входа FastAPI
+│   ├── config.py            # Настройки из .env (pydantic-settings)
 │   ├── database.py          # Async SQLAlchemy engine + session
 │   ├── models/
-│   │   ├── user.py          # User model
-│   │   └── car.py           # Car + StarSnap models
+│   │   ├── user.py          # Пользователь
+│   │   └── car.py           # Car, StarSnap, ServicePlan
 │   ├── services/
-│   │   ├── auth.py          # JWT + bcrypt helpers
-│   │   └── starline.py      # StarLine API client
+│   │   ├── auth.py          # JWT + bcrypt
+│   │   ├── starline.py      # StarLine API клиент
+│   │   └── scheduler.py     # Планировщик автосбора
 │   ├── routers/
 │   │   ├── auth.py          # /auth/register, /auth/login
 │   │   ├── starline.py      # /starline/connect, /starline/fetch, /starline/reset-motohours
-│   │   └── dashboard.py     # HTML page routes
+│   │   ├── dashboard.py     # Главная, дашборд, страницы
+│   │   └── service_plan.py  # /service-plan/add, /done, /delete
 │   └── templates/           # Jinja2 + Tailwind + Alpine.js
-└── .env                     # Your secrets (not committed)
+└── .env                     # Секреты (не коммитить!)
 ```
 
 ---
 
-## 📄 License
+## 📄 Лицензия
 
- Apache License Version 2.0
+MIT
