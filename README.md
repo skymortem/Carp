@@ -52,7 +52,7 @@ Carp сам забирает телеметрию с CAN-шины автомоб
 
 ```bash
 # Клонирование
-git clone https://github.com/yourname/carp.git
+git clone https://github.com/skymortem/carp.git
 cd carp/backend
 
 # Виртуальное окружение
