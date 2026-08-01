@@ -54,7 +54,6 @@ async def dashboard_page(
         result = await db.execute(
             select(StarSnap).where(StarSnap.car_id == car.id)
             .order_by(desc(StarSnap.ts))
-            .limit(100)
         )
         snaps_orm = result.scalars().all()
         snaps = [
