@@ -1,4 +1,4 @@
-import os
+from datetime import timezone
 from pathlib import Path
 from typing import Optional
 
@@ -12,6 +12,8 @@ from app.database import get_db
 from app.models.user import User
 from app.models.car import Car, StarSnap, ServicePlan
 from app.services.auth import get_current_user_from_cookie, maybe_user
+
+from app.services.maintenance import current_readings, plan_status
 
 router = APIRouter(tags=["pages"])
 
@@ -49,17 +51,18 @@ async def dashboard_page(
     snaps_reversed = []
     service_plans = []
     starline_connected = False
+    current_km = current_mh = None
 
     if car:
         result = await db.execute(
             select(StarSnap).where(StarSnap.car_id == car.id)
-            .order_by(desc(StarSnap.ts))
+            .order_by(desc(StarSnap.ts), desc(StarSnap.id)).limit(2000)
         )
         snaps_orm = result.scalars().all()
         snaps = [
             {
                 "id": s.id,
-                "ts": s.ts.isoformat() if s.ts else None,
+                "ts": s.ts.replace(tzinfo=timezone.utc).isoformat() if s.ts else None,
                 "mileage_km": s.mileage_km,
                 "fuel_litres": s.fuel_litres,
                 "fuel_percent": s.fuel_percent,
@@ -74,61 +77,20 @@ async def dashboard_page(
                 "motohours_minutes": s.motohours_minutes,
                 "lat": s.lat,
                 "lon": s.lon,
-                "created_at": s.created_at.isoformat() if s.created_at else None,
+                "created_at": s.created_at.replace(tzinfo=timezone.utc).isoformat() if s.created_at else None,
             }
             for s in snaps_orm
         ]
         snaps_reversed = list(reversed(snaps))
         starline_connected = bool(car.starline_device_id)
 
-        # Загружаем планы ТО
-        snap_result = await db.execute(
-            select(StarSnap).where(StarSnap.car_id == car.id).order_by(desc(StarSnap.ts)).limit(1)
-        )
-        snap = snap_result.scalar_one_or_none()
-        current_km = snap.mileage_km if snap else 0
-        current_mh = snap.motohours_minutes if snap else 0
-
+        current_km, current_mh = await current_readings(db, car.id)
         plan_result = await db.execute(select(ServicePlan).where(ServicePlan.car_id == car.id))
         plans = plan_result.scalars().all()
 
         service_plans = []
         for p in plans:
-            remain = []
-            urgent = False
-
-            if p.interval_km and p.last_mileage_km is not None:
-                km_left = p.last_mileage_km + p.interval_km - current_km
-                label = f"{km_left} км" if km_left > 0 else "⚠️ Просрочено!"
-                remain.append(label)
-                if km_left < 1000:
-                    urgent = True
-
-            if p.interval_months and p.last_date is not None:
-                from datetime import datetime, timezone, timedelta
-                next_date = p.last_date.replace(tzinfo=timezone.utc) + timedelta(days=p.interval_months * 30)
-                now = datetime.now(timezone.utc)
-                days_left = (next_date - now).days
-                label = f"{days_left} дн" if days_left > 0 else "⚠️ Просрочено!"
-                remain.append(label)
-                if days_left < 30:
-                    urgent = True
-
-            if p.interval_motohours and p.last_motohours is not None:
-                if current_mh:
-                    interval_minutes = p.interval_motohours * 60
-                    mh_left = p.last_motohours + interval_minutes - current_mh
-                    h_left = mh_left // 60
-                    label = f"{h_left} ч" if mh_left > 0 else "⚠️ Просрочено!"
-                    remain.append(label)
-                    if mh_left < 50 * 60:
-                        urgent = True
-
-            service_plans.append({
-                "name": p.name,
-                "remain": ", ".join(remain) if remain else "—",
-                "urgent": urgent,
-            })
+            service_plans.append({"name": p.name, **plan_status(p, current_km, current_mh)})
 
         # Сортируем: срочные сверху
         service_plans.sort(key=lambda x: (not x["urgent"], x["name"]))
@@ -138,7 +100,7 @@ async def dashboard_page(
         snaps_reversed=snaps_reversed, starline_connected=starline_connected,
         initial_motohours=getattr(car, "initial_motohours", 0) if car else 0,
         motohours_reset_at=getattr(car, "motohours_reset_at", None) if car else None,
-        service_plans=service_plans))
+        service_plans=service_plans, current_km=current_km, current_mh=current_mh))
 
 
 @router.get("/login", response_class=HTMLResponse)

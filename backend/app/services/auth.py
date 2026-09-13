@@ -1,4 +1,3 @@
-import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -21,7 +20,10 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except ValueError:
+        return False
 
 
 def create_jwt(user_id: int) -> str:

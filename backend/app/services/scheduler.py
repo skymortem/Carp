@@ -3,17 +3,16 @@
 Запускается вместе с сервером, собирает данные раз в час
 для всех пользователей, у которых есть подключённая StarLine машина.
 """
-import asyncio
 import logging
-from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import select
 
 from app.config import settings
 from app.database import async_session
-from app.models.car import Car, StarSnap
-from app.services.starline import StarLineClient, StarLineError
+from app.models.car import Car
+from app.services.starline import configured_client, StarLineError
+from app.services.collection import collect_snapshot, save_snapshot
 
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
@@ -36,21 +35,17 @@ async def collect_all_cars():
         logger.info("Scheduled collect: no StarLine cars found")
         return
 
-    client = StarLineClient(
-        settings.starline_app_id,
-        settings.starline_app_secret or "",
-        settings.starline_login or "",
-        settings.starline_password or "",
-    )
+    try:
+        client = configured_client()
+    except StarLineError:
+        logger.info("StarLine credentials incomplete; collection skipped")
+        return
 
     for car in cars:
         try:
-            data = client.get_device_data(car.starline_device_id)
-            snapshot = StarLineClient.parse_snapshot(data)
-            snap = StarSnap(car_id=car.id, **snapshot)
+            snapshot = await collect_snapshot(client, car.starline_device_id)
             async with async_session() as db:
-                db.add(snap)
-                await db.commit()
+                await save_snapshot(db, car.id, snapshot)
             logger.info(
                 "Collected car=%s: mileage=%s fuel=%s motohrs=%s",
                 car.id, snapshot["mileage_km"],
@@ -65,8 +60,7 @@ async def collect_all_cars():
 
 
 async def run_collect_once():
-    """Запустить сбор синхронно (для теста при старте)."""
-    loop = asyncio.get_event_loop()
+    """Задача периодического сбора."""
     await collect_all_cars()
 
 

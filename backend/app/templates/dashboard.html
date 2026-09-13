@@ -19,20 +19,20 @@
     <!-- Индикаторы -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
         <div class="card p-4">
-            <div class="text-sm text-slate-400">Пробег</div>
-            <div class="text-2xl font-bold" x-text="latest?.mileage_km ? latest.mileage_km.toLocaleString() + ' км' : '—'"></div>
+            <div class="text-sm text-slate-400">Пробег · последнее известное показание</div>
+            <div class="text-2xl font-bold" x-text="currentKm !== null ? currentKm.toLocaleString() + ' км' : '—'"></div>
         </div>
         <div class="card p-4">
             <div class="text-sm text-slate-400">Топливо в баке</div>
-            <div class="text-2xl font-bold" x-text="latest?.fuel_litres ? latest.fuel_litres + ' л' : '—'"></div>
+            <div class="text-2xl font-bold" x-text="latest?.fuel_litres != null ? latest.fuel_litres + ' л' : '—'"></div>
         </div>
         <div class="card p-4">
             <div class="text-sm text-slate-400">Двигатель</div>
-            <div class="text-2xl font-bold" x-text="latest?.engine_on ? '🔥 Заведён' : '⏹ Заглушен'" 
+            <div class="text-2xl font-bold" x-text="latest?.engine_on == null ? '—' : (latest.engine_on ? '🔥 Заведён' : '⏹ Заглушен')"
                  :class="latest?.engine_on ? 'text-green-400' : 'text-slate-400'"></div>
         </div>
         <div class="card p-4">
-            <div class="text-sm text-slate-400">Моточасы</div>
+            <div class="text-sm text-slate-400">Накопительные моточасы · последнее известное показание</div>
             <div class="text-2xl font-bold text-amber-400" x-text="motohoursDisplay"></div>
             <div class="text-xs text-slate-500 mt-1" x-show="latest?.engine_on">🟢 считаются</div>
         </div>
@@ -51,7 +51,7 @@
     <!-- График пробега по месяцам -->
     {% if snaps_reversed|length > 1 %}
     <div class="card p-6 mb-6">
-        <h3 class="font-bold mb-4">📈 Пробег по месяцам (км)</h3>
+        <h3 class="font-bold mb-4">📈 Изменение пробега по месяцам (до 2000 последних снимков)</h3>
         <canvas id="mileageChart" height="100"></canvas>
     </div>
     {% endif %}
@@ -63,7 +63,7 @@
         <div class="space-y-2">
             {% for p in service_plans %}
             <div class="flex items-center justify-between py-2 px-3 rounded-lg {% if p.urgent %}bg-red-900/30 border border-red-700/50{% else %}bg-slate-800/30{% endif %}">
-                <span class="font-medium">{{ p.name }}</span>
+                <span class="font-medium">{{ p.name }}{% if p.overdue %} · ТО требуется{% elif p.urgent %} · Скоро ТО{% endif %}</span>
                 <span class="text-sm {% if p.urgent %}text-red-400 font-bold{% else %}text-slate-400{% endif %}">{{ p.remain }}</span>
             </div>
             {% endfor %}
@@ -91,10 +91,10 @@
                     {% for snap in snaps[:20] %}
                     <tr class="border-b border-slate-800">
                         <td class="py-2">{{ snap.ts[:16].replace('T', ' ') if snap.ts else '—' }}</td>
-                        <td class="text-right">{{ snap.mileage_km|default('—', true) }}</td>
-                        <td class="text-right">{{ '%.1f л'|format(snap.fuel_litres) if snap.fuel_litres else '—' }}</td>
+                        <td class="text-right">{{ snap.mileage_km if snap.mileage_km is not none else '—' }}</td>
+                        <td class="text-right">{{ '%.1f л'|format(snap.fuel_litres) if snap.fuel_litres is not none else '—' }}</td>
                         <td class="text-right">{{ '%d км/ч'|format(snap.speed_kmh|int) if snap.speed_kmh else '—' }}</td>
-                        <td class="text-center">{{ '🔥' if snap.engine_on else '⏹' }}</td>
+                        <td class="text-center">{{ '—' if snap.engine_on is none else ('🔥' if snap.engine_on else '⏹') }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -106,22 +106,20 @@
 {% endblock %}
 
 {% block scripts %}
-{% if snaps_reversed|length > 1 %}
 <script>
     const snaps = {{ snaps_reversed|tojson }};
-    const initialMotohours = {{ initial_motohours|default(0) }};
 
     function dashboard() {
         return {
+            currentKm: {{ current_km|tojson }},
+            currentMh: {{ current_mh|tojson }},
             loading: false,
             latest: snaps.length > 0 ? snaps[snaps.length - 1] : null,
             get motohoursDisplay() {
-                const m = this.latest?.motohours_minutes;
+                const m = this.currentMh;
                 if (m === null || m === undefined) return '—';
-                const since = m - initialMotohours;
-                if (since < 0) return Math.floor(m/60) + 'ч ' + (m%60) + 'м';
-                const h = Math.floor(since / 60);
-                const min = since % 60;
+                const h = Math.floor(m / 60);
+                const min = m % 60;
                 return h + 'ч ' + min + 'м';
             },
             async fetchStarLine() {
@@ -187,5 +185,4 @@
         }
     });
 </script>
-{% endif %}
 {% endblock %}

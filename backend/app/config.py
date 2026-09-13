@@ -1,4 +1,4 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
 
@@ -25,9 +25,35 @@ class Settings(BaseSettings):
     # Cron: интервал сбора данных (в минутах)
     collect_interval_minutes: int = 60
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 
 settings = Settings()
+
+def persist_settings(values: dict[str, str]):
+    """Атомарно обновить локальный .env; файл доступен только владельцу."""
+    import os
+    import tempfile
+    from pathlib import Path
+    from dotenv import set_key
+
+    path = Path(settings.model_config.get('env_file') or '.env').resolve()
+    fd, temporary = tempfile.mkstemp(prefix='.carp-env-', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as output:
+            if path.exists():
+                output.write(path.read_text(encoding='utf-8'))
+        for name, value in values.items():
+            set_key(temporary, name.upper(), value)
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+        for name, value in values.items():
+            setattr(settings, name.lower(), value)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+if not settings.secret_key or settings.secret_key == 'change-me-to-something-secret-in-production':
+    import secrets
+    persist_settings({'secret_key': secrets.token_hex(32)})

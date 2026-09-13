@@ -114,3 +114,12 @@ backend/
 ## 📄 License
 
  Apache License Version 2.0
+
+
+## Maintenance and verification notes
+
+This installation is for one owner; registration closes after the first account is created. Connecting through `/setup` saves StarLine credentials to the local `.env` (mode `0600`) for manual and scheduled collection, including after restart. Process environment variables override `.env`. Run from `backend` with one Uvicorn worker, since the scheduler and token cache are process-local. An absent or default JWT secret is replaced with a generated, persisted key. Sessions use HttpOnly cookies and Secure when served through HTTPS.
+
+Maintenance warnings trigger when **any** configured interval reaches 1000 km, 30 days, or 50 hours remaining. Any exhausted interval makes maintenance due. Months are calendar months. Engine hours are accumulated readings (hours in forms, minutes in storage), never a rolling events total. Missing telemetry uses the latest known non-null reading. Legacy rolling engine-hour totals cannot be identified reliably and need separate review. Database schema is unchanged.
+
+Run `pip install -r requirements.txt pytest pytest-asyncio` and `python -m pytest tests -q` from `backend`. Tests use a temporary database and mocked StarLine responses; the template JavaScript test requires Node.js.

@@ -1,16 +1,18 @@
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ConfigDict
+from datetime import date as Date
+from app.services.maintenance import current_readings, plan_status, format_hours
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.user import User
-from app.models.car import Car, StarSnap, ServicePlan
+from app.models.car import Car, ServicePlan
 from app.services.auth import get_current_user_from_cookie
 
 logger = logging.getLogger(__name__)
@@ -18,26 +20,28 @@ router = APIRouter(prefix="/service-plan", tags=["service"])
 
 
 class ServicePlanForm(BaseModel):
-    name: str
-    interval_km: Optional[int] = None
-    interval_months: Optional[int] = None
-    interval_motohours: Optional[int] = None
+    model_config = ConfigDict(str_strip_whitespace=True)
+    name: str = Field(min_length=1, max_length=200)
+    interval_km: Optional[int] = Field(default=None, gt=0)
+    interval_months: Optional[int] = Field(default=None, gt=0, le=1200)
+    interval_motohours: Optional[int] = Field(default=None, gt=0)
     notes: Optional[str] = None
 
 
 class PlanUpdateForm(BaseModel):
-    name: Optional[str] = None
-    interval_km: Optional[int] = None
-    interval_months: Optional[int] = None
-    interval_motohours: Optional[int] = None
+    model_config = ConfigDict(str_strip_whitespace=True)
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    interval_km: Optional[int] = Field(default=None, gt=0)
+    interval_months: Optional[int] = Field(default=None, gt=0, le=1200)
+    interval_motohours: Optional[int] = Field(default=None, gt=0)
     notes: Optional[str] = None
 
 
 class CompleteForm(BaseModel):
-    plan_ids: list[int]
-    mileage_km: Optional[int] = None
-    motohours: Optional[int] = None
-    date: Optional[str] = None  # ISO date, default today
+    plan_ids: list[int] = Field(min_length=1)
+    mileage_km: Optional[int] = Field(default=None, ge=0)
+    motohours: Optional[int] = Field(default=None, ge=0)
+    date: Optional[Date] = None
 
 
 async def get_car(user: User, db: AsyncSession) -> Car:
@@ -48,13 +52,6 @@ async def get_car(user: User, db: AsyncSession) -> Car:
     return car
 
 
-async def get_latest_snap(car_id: int, db: AsyncSession):
-    result = await db.execute(
-        select(StarSnap).where(StarSnap.car_id == car_id).order_by(desc(StarSnap.ts)).limit(1)
-    )
-    return result.scalar_one_or_none()
-
-
 @router.post("/add")
 async def add_plan(
     body: ServicePlanForm,
@@ -63,6 +60,8 @@ async def add_plan(
 ):
     """Создать шаблон операции ТО (без привязки к пробегу/дате)."""
     car = await get_car(user, db)
+    if not any((body.interval_km, body.interval_months, body.interval_motohours)):
+        raise HTTPException(422, "Укажите хотя бы один интервал ТО")
     plan = ServicePlan(car_id=car.id, **body.model_dump(exclude_none=True))
     db.add(plan)
     await db.commit()
@@ -85,7 +84,12 @@ async def update_plan(
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
 
-    data = body.model_dump(exclude_none=True)
+    data = body.model_dump(exclude_unset=True)
+    if 'name' in data and (data['name'] is None or not data['name'].strip()):
+        raise HTTPException(422, "Укажите название операции")
+    if not any(data.get(key, getattr(plan, key)) for key in
+               ('interval_km', 'interval_months', 'interval_motohours')):
+        raise HTTPException(422, "Укажите хотя бы один интервал ТО")
     for key, val in data.items():
         setattr(plan, key, val)
     await db.commit()
@@ -100,31 +104,24 @@ async def complete_plans(
 ):
     """Отметить ТО для выбранных операций с указанным пробегом/моточасами/датой."""
     car = await get_car(user, db)
-    snap = await get_latest_snap(car.id, db)
-
-    # Данные для простановки
-    set_km = body.mileage_km if body.mileage_km is not None else (snap.mileage_km if snap else 0)
-    # ВАЖНО: моточасы хранятся в минутах, пользователь вводит в часах — конвертируем
-    if body.motohours is not None:
-        set_mh = body.motohours * 60
-    else:
-        set_mh = snap.motohours_minutes if snap else 0
-    if body.date:
-        try:
-            set_date = datetime.strptime(body.date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        except ValueError:
-            set_date = datetime.now(timezone.utc)
-    else:
-        set_date = datetime.now(timezone.utc)
+    current_km, current_mh = await current_readings(db, car.id)
+    set_km = body.mileage_km if body.mileage_km is not None else current_km
+    set_mh = body.motohours * 60 if body.motohours is not None else current_mh
+    set_date = (datetime.combine(body.date, datetime.min.time(), tzinfo=timezone.utc)
+                if body.date else datetime.now(timezone.utc))
+    if set_date > datetime.now(timezone.utc):
+        raise HTTPException(422, "Дата ТО не может быть в будущем")
 
     updated = []
-    for pid in body.plan_ids:
+    for pid in dict.fromkeys(body.plan_ids):
         result = await db.execute(
             select(ServicePlan).where(ServicePlan.id == pid, ServicePlan.car_id == car.id)
         )
         plan = result.scalar_one_or_none()
         if plan is None:
-            continue
+            raise HTTPException(404, "Операция ТО не найдена")
+        if (plan.interval_km and set_km is None) or (plan.interval_motohours and set_mh is None):
+            raise HTTPException(422, "Нет показаний: укажите пробег и моточасы для выбранных интервалов")
         plan.last_mileage_km = set_km
         plan.last_motohours = set_mh
         plan.last_date = set_date
@@ -155,6 +152,9 @@ async def delete_plan(
     plan = result.scalar_one_or_none()
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
+    from app.models.car import ServiceLog
+    from sqlalchemy import update
+    await db.execute(update(ServiceLog).where(ServiceLog.plan_id == plan.id).values(plan_id=None))
     await db.delete(plan)
     await db.commit()
     return {"ok": True}
@@ -167,9 +167,7 @@ async def service_plan_page(
     db: AsyncSession = Depends(get_db),
 ):
     car = await get_car(user, db)
-    snap = await get_latest_snap(car.id, db)
-    current_km = snap.mileage_km if snap else 0
-    current_mh = snap.motohours_minutes if snap else 0
+    current_km, current_mh = await current_readings(db, car.id)
 
     result = await db.execute(select(ServicePlan).where(ServicePlan.car_id == car.id))
     plans = result.scalars().all()
@@ -177,35 +175,7 @@ async def service_plan_page(
     now = datetime.now(timezone.utc)
     plans_data = []
     for p in plans:
-        status = []
-        overdue = False
-        active = False  # есть пробег/дата для отсчёта
-
-        if p.interval_km and p.last_mileage_km is not None:
-            active = True
-            km_left = p.last_mileage_km + p.interval_km - current_km
-            status.append(f"{km_left} км" if km_left > 0 else "⚠️ Просрочено!")
-            if km_left <= 0:
-                overdue = True
-
-        if p.interval_months and p.last_date is not None:
-            active = True
-            next_date = p.last_date.replace(tzinfo=timezone.utc) + timedelta(days=p.interval_months * 30)
-            days = (next_date - now).days
-            status.append(f"{days} дн" if days > 0 else "⚠️ Просрочено!")
-            if days <= 0:
-                overdue = True
-
-        if p.interval_motohours and p.last_motohours is not None:
-            active = True
-            if current_mh:
-                # interval_motohours в часах, last_motohours и current_mh в минутах
-                interval_minutes = p.interval_motohours * 60
-                mh_left = p.last_motohours + interval_minutes - current_mh
-                status.append(f"{mh_left // 60} ч" if mh_left > 0 else "⚠️ Просрочено!")
-                if mh_left <= 0:
-                    overdue = True
-
+        state = plan_status(p, current_km, current_mh, now)
         plans_data.append({
             "id": p.id,
             "name": p.name,
@@ -213,10 +183,8 @@ async def service_plan_page(
             "interval_months": p.interval_months,
             "interval_motohours": p.interval_motohours,
             "notes": p.notes,
-            "last_info": f"{p.last_mileage_km or '—'} км · {p.last_date.strftime('%d.%m.%Y') if p.last_date else '—'} · {p.last_motohours or '—'} м/ч" if active else "—",
-            "status": ", ".join(status) if status else "—",
-            "overdue": overdue,
-            "active": active,
+            "last_info": f"{p.last_mileage_km if p.last_mileage_km is not None else '—'} км · {p.last_date.strftime('%d.%m.%Y') if p.last_date else '—'} · {format_hours(p.last_motohours)}",
+            **state,
         })
 
     return HTMLResponse(render_template("service_plan.html", request=request,
@@ -241,6 +209,7 @@ async def get_history(
             "id": log.id,
             "plan_name": log.plan_name,
             "mileage_km": log.mileage_km,
+            "motohours": format_hours(log.motohours),
             "done_at": log.done_at.strftime("%d.%m.%Y") if log.done_at else "—",
         }
         for log in logs

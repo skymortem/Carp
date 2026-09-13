@@ -9,6 +9,9 @@ StarLine API клиент.
   4. get_slnet_token()   — POST https://developer.starline.ru/json/v2/auth.slid
   5. get_device_data()   — GET  https://developer.starline.ru/json/v3/device/{id}/data
 """
+import asyncio
+import time
+from functools import lru_cache
 import hashlib
 import logging
 from datetime import datetime, timezone
@@ -29,6 +32,8 @@ class StarLineError(Exception):
 
 class StarLineClient:
     def __init__(self, app_id: str, app_secret: str, login: str, password: str):
+        self._auth_lock = asyncio.Lock()
+        self._authenticated_at = 0
         self.app_id = app_id
         self.app_secret = app_secret
         self.login = login
@@ -40,65 +45,104 @@ class StarLineClient:
         self._user_login: Optional[str] = None
         self._webapi_user_id: Optional[str] = None
 
+    async def _request(self, method, url, _allow_unauthorized=False, **kwargs):
+        try:
+            cookies = kwargs.pop("cookies", None)
+            async with httpx.AsyncClient(cookies=cookies) as client:
+                response = await client.request(method, url, **kwargs)
+            if response.status_code == 401 and _allow_unauthorized:
+                return response
+            response.raise_for_status()
+            # Validate JSON here so malformed upstream responses become controlled errors.
+            if not isinstance(response.json(), dict):
+                raise ValueError("Expected JSON object")
+            return response
+        except (httpx.HTTPError, ValueError) as exc:
+            raise StarLineError("StarLine недоступен или вернул некорректный ответ") from exc
+
+    @staticmethod
+    def _required(data, key):
+        value = data.get(key)
+        if not isinstance(value, str) or not value:
+            raise StarLineError("В ответе StarLine отсутствует обязательное поле")
+        return value
+
+    async def ensure_auth(self):
+        async with self._auth_lock:
+            if not self._slnet_token or time.monotonic() - self._authenticated_at >= 23 * 3600:
+                await self.auth()
+
+    async def api_request(self, method, endpoint, **kwargs):
+        await self.ensure_auth()
+        token = self._slnet_token
+        response = await self._request(method, f"{API_BASE}{endpoint}",
+            cookies={"slnet": token}, timeout=15, _allow_unauthorized=True, **kwargs)
+        if response.status_code == 401:
+            async with self._auth_lock:
+                if self._slnet_token == token:
+                    await self.auth()
+            response = await self._request(method, f"{API_BASE}{endpoint}",
+                cookies={"slnet": self._slnet_token}, timeout=15, **kwargs)
+        return response
+
     # ── 1. Код приложения ──────────────────────────────────────────
 
-    def _get_app_code(self) -> str:
+    async def _get_app_code(self) -> str:
         md5_secret = hashlib.md5(self.app_secret.encode("utf-8")).hexdigest()
         url = f"{SLID_BASE}/apiV3/application/getCode/"
         params = {"appId": self.app_id, "secret": md5_secret}
-        resp = httpx.get(url, params=params, timeout=15)
+        resp = await self._request("GET", url, params=params, timeout=15)
         data = resp.json()
-        if data.get("state") != 1:
-            raise StarLineError(f"getCode failed: {data}")
-        return data["desc"]["code"]
+        if data.get("state") != 1 or not isinstance(data.get("desc"), dict):
+            raise StarLineError("Не удалось получить код приложения StarLine")
+        return self._required(data["desc"], "code")
 
     # ── 2. Токен приложения ────────────────────────────────────────
 
-    def _get_app_token(self, app_code: str) -> str:
+    async def _get_app_token(self, app_code: str) -> str:
         md5_secret = hashlib.md5((self.app_secret + app_code).encode("utf-8")).hexdigest()
         url = f"{SLID_BASE}/apiV3/application/getToken/"
         params = {"appId": self.app_id, "secret": md5_secret}
-        resp = httpx.get(url, params=params, timeout=15)
+        resp = await self._request("GET", url, params=params, timeout=15)
         data = resp.json()
-        if data.get("state") != 1:
-            raise StarLineError(f"getToken failed: {data}")
-        return data["desc"]["token"]
+        if data.get("state") != 1 or not isinstance(data.get("desc"), dict):
+            raise StarLineError("Не удалось получить токен приложения StarLine")
+        return self._required(data["desc"], "token")
 
     # ── 3. Пользовательский токен SLID ─────────────────────────────
 
-    def _get_user_token(self, app_token: str, client_ip: str = "") -> str:
+    async def _get_user_token(self, app_token: str, client_ip: str = "") -> str:
         url = f"{SLID_BASE}/apiV3/user/login/"
         sha1_pass = hashlib.sha1(self.password.encode("utf-8")).hexdigest()
         params = {"token": app_token}
         if client_ip:
             params["user_ip"] = client_ip
         payload = {"login": self.login, "pass": sha1_pass}
-        resp = httpx.post(url, params=params, data=payload, timeout=15)
+        resp = await self._request("POST", url, params=params, data=payload, timeout=15)
         data = resp.json()
-        if data.get("state") != 1:
-            error_msg = data.get("desc", {}).get("message", str(data))
+        if data.get("state") != 1 or not isinstance(data.get("desc"), dict):
+            error_msg = str(data.get("desc", ""))
             if "captcha" in error_msg.lower():
                 raise StarLineError(
                     "StarLine требует капчу. Слишком много запросов. "
                     "Подожди 2-3 минуты и попробуй снова."
                 )
-            raise StarLineError(f"User login failed: {data}")
+            raise StarLineError("Ошибка входа в StarLine")
         # Сохраняем все данные пользователя из SLID
         user_desc = data.get("desc", {})
         self._user_id = str(user_desc.get("id", ""))
         self._user_login = user_desc.get("login", self.login)
-        logger.info("SLID login response: %s", data)
-        return data["desc"]["user_token"]
+        return self._required(data["desc"], "user_token")
 
     # ── 4. slnet_token (24ч) ───────────────────────────────────────
 
-    def _get_slnet_token(self, slid_token: str) -> str:
+    async def _get_slnet_token(self, slid_token: str) -> str:
         url = f"{API_BASE}/json/v2/auth.slid"
         payload = {"slid_token": slid_token}
-        resp = httpx.post(url, json=payload, timeout=15)
+        resp = await self._request("POST", url, json=payload, timeout=15)
         slnet = resp.cookies.get("slnet")
         if not slnet:
-            raise StarLineError(f"Auth.slid failed — no slnet cookie: {resp.text}")
+            raise StarLineError("StarLine не вернул сессионную cookie")
 
         # Сохраняем WebAPI user_id из ответа auth.slid (отличается от SLID user_id!)
         body = resp.json()
@@ -108,65 +152,46 @@ class StarLineClient:
 
     # ── Публичный: полная авторизация ─────────────────────────────
 
-    def auth(self) -> str:
+    async def auth(self) -> str:
         """Полный цикл авторизации. Возвращает slnet_token (живёт 24ч)."""
         logger.info("StarLine: step 1 — get app code")
-        app_code = self._get_app_code()
+        app_code = await self._get_app_code()
         logger.info("StarLine: step 2 — get app token")
-        app_token = self._get_app_token(app_code)
+        app_token = await self._get_app_token(app_code)
         self._app_token = app_token
         logger.info("StarLine: step 3 — user login")
-        user_token = self._get_user_token(app_token)
+        user_token = await self._get_user_token(app_token)
         self._user_token = user_token
         logger.info("StarLine: step 4 — get slnet token")
-        slnet = self._get_slnet_token(user_token)
+        slnet = await self._get_slnet_token(user_token)
         self._slnet_token = slnet
+        self._authenticated_at = time.monotonic()
         logger.info("StarLine: auth successful")
         return slnet
 
     # ── Получение данных устройства ────────────────────────────────
 
-    def get_device_data(self, device_id: str) -> dict:
+    async def get_device_data(self, device_id: str) -> dict:
         """Получить полные данные об устройстве.
         Возвращает DeviceData (obd.mileage, obd.fuel_litres, position, common и т.д.)"""
-        if not self._slnet_token:
-            self.auth()
-
-        url = f"{API_BASE}/json/v3/device/{device_id}/data"
-        cookies = {"slnet": self._slnet_token}
-        resp = httpx.get(url, cookies=cookies, timeout=15)
-
-        # Если 401 — токен протух, переавторизоваться
-        if resp.status_code == 401:
-            logger.info("StarLine: token expired, re-authing")
-            self.auth()
-            cookies = {"slnet": self._slnet_token}
-            resp = httpx.get(url, cookies=cookies, timeout=15)
-
+        resp = await self.api_request("GET", f"/json/v3/device/{device_id}/data")
         data = resp.json()
         if data.get("code") != 200:
-            raise StarLineError(f"getDeviceData failed: {data}")
+            raise StarLineError("StarLine не вернул данные устройства")
 
-        device_data = data["data"]
-        logger.info("getDeviceData keys: %s", list(device_data.keys()))
-        logger.info("getDeviceData obd: %s", device_data.get("obd"))
-        logger.info("getDeviceData position: %s", device_data.get("position"))
-        if device_data.get("common"):
-            logger.info("getDeviceData common: %s", device_data.get("common"))
-        if device_data.get("state"):
-            logger.info("getDeviceData state: %s", device_data.get("state"))
+        device_data = data.get("data")
+        if not isinstance(device_data, dict):
+            raise StarLineError("StarLine вернул некорректные данные устройства")
         return device_data
 
     # ── Получение списка устройств пользователя ────────────────────
 
-    def get_user_devices(self) -> list[dict]:
+    async def get_user_devices(self) -> list[dict]:
         """Получить список устройств пользователя."""
-        if not self._slnet_token:
-            self.auth()
+        await self.ensure_auth()
         if not self._webapi_user_id:
             raise StarLineError("No WebAPI user_id from auth.slid")
 
-        cookies = {"slnet": self._slnet_token}
         uid = self._webapi_user_id
 
         endpoints = [
@@ -176,126 +201,82 @@ class StarLineClient:
         ]
         for url in endpoints:
             try:
-                resp = httpx.get(url, cookies=cookies, timeout=15)
+                resp = await self.api_request("GET", url.removeprefix(API_BASE))
                 data = resp.json()
-                logger.info("getUserDevices %s → %s", url.split("/")[-1], data)
                 if data.get("code") == 200:
                     items = data.get("devices") or data.get("data") or []
-                    if items:
-                        return items
+                    if isinstance(items, dict):
+                        items = items.get("devices", [])
+                    if isinstance(items, list):
+                        items = [item for item in items if isinstance(item, dict) and item.get("device_id")]
+                        if items:
+                            return items
             except Exception:
                 continue
 
         raise StarLineError("Could not find devices for this user")
-
-    # ── Получение трека (пробег из трека) ──────────────────────────
-
-    def get_last_position(self, device_id: str) -> dict:
-        """Получить последние данные о местоположении (может содержать пробег)."""
-        if not self._slnet_token:
-            self.auth()
-        cookies = {"slnet": self._slnet_token}
-        # Пробуем position endpoint
-        url = f"{API_BASE}/json/v1/device/{device_id}/position"
-        resp = httpx.get(url, cookies=cookies, timeout=15)
-        data = resp.json()
-        logger.info("getPosition response: %s", data)
-        return data
-
-    # ── Получение данных OBD (пробег по CAN) ─────────────────────
-
-    def get_obd_data(self, device_id: str) -> dict:
-        """Получить историю пробега по CAN.
-        POST /json/v1/device/{device_id}/getObdData"""
-        if not self._slnet_token:
-            self.auth()
-        url = f"{API_BASE}/json/v1/device/{device_id}/getObdData"
-        cookies = {"slnet": self._slnet_token}
-        # Пробуем с пустым JSON телом
-        resp = httpx.post(url, cookies=cookies, json={}, timeout=15)
-        if resp.status_code in (401, 400):
-            self.auth()
-            cookies = {"slnet": self._slnet_token}
-            resp = httpx.post(url, cookies=cookies, json={}, timeout=15)
-        data = resp.json()
-        logger.info("getObdData response: %s", data)
-        return data
-
-    # ── Получение моточасов через события ──────────────────────────
-
-    def get_engine_hours_from_events(self, device_id: str, days: int = 7) -> dict:
-        """Вычислить моточасы по событиям запуска/остановки двигателя за N дней."""
-        if not self._slnet_token:
-            self.auth()
-        now = int(datetime.now().timestamp())
-        period_start = now - days * 86400
-
-        url = f"{API_BASE}/json/v2/device/{device_id}/events"
-        cookies = {"slnet": self._slnet_token}
-        payload = {"period_start": period_start, "period_end": now}
-        resp = httpx.post(url, cookies=cookies, json=payload, timeout=15)
-        data = resp.json()
-        logger.info("getEngineHours: %d events", len(data.get("events", [])))
-
-        events = data.get("events", [])
-        # Фильтруем только события двигателя (groupId=5, type=1037/1042)
-        ign_on_events = [e for e in events if e.get("type") == 1037]
-        ign_off_events = [e for e in events if e.get("type") == 1042]
-
-        # Сортируем по времени
-        all_engine = sorted(
-            [{"ts": e["timestamp"], "type": "on"} for e in ign_on_events] +
-            [{"ts": e["timestamp"], "type": "off"} for e in ign_off_events],
-            key=lambda x: x["ts"]
-        )
-
-        total_minutes = 0
-        start_ts = None
-
-        for entry in all_engine:
-            if entry["type"] == "on" and start_ts is None:
-                start_ts = entry["ts"]
-            elif entry["type"] == "off" and start_ts is not None:
-                total_minutes += (entry["ts"] - start_ts) // 60
-                start_ts = None
-
-        return {
-            "motohours_minutes": total_minutes,
-            "ign_on_count": len(ign_on_events),
-            "ign_off_count": len(ign_off_events),
-            "period_days": days,
-        }
 
     # ── Метод-хелп: распарсить сниппет ─────────────────────────────
 
     @staticmethod
     def parse_snapshot(device_data: dict) -> dict:
         """Извлечь нужные поля из DeviceData в плоский словарь."""
-        obd = device_data.get("obd") or {}
-        position = device_data.get("position") or {}
-        common = device_data.get("common") or {}
-        state = device_data.get("state") or {}
+        def section(name):
+            value = device_data.get(name)
+            return value if isinstance(value, dict) else {}
+        obd, position, common, state = (section(name) for name in ('obd', 'position', 'common', 'state'))
 
-        ts_raw = obd.get("ts") or device_data.get("activity_ts") or 0
+        def counter(value):
+            try:
+                if value is None or isinstance(value, bool):
+                    return None
+                number = float(value)
+                return int(number) if number >= 0 and number.is_integer() else None
+            except (ValueError, TypeError, OverflowError):
+                return None
+
+        def flag(value):
+            if value in (True, 1, '1'):
+                return True
+            if value in (False, 0, '0'):
+                return False
+            return None
+
+        ts_raw = obd.get("ts") or device_data.get("activity_ts")
         try:
+            if ts_raw is None or int(ts_raw) <= 0:
+                raise ValueError("Missing timestamp")
             ts = datetime.fromtimestamp(int(ts_raw), tz=timezone.utc)
-        except (ValueError, OSError):
+        except (TypeError, ValueError, OSError, OverflowError):
             ts = datetime.now(tz=timezone.utc)
 
         return {
             "ts": ts,
-            "mileage_km": obd.get("mileage"),
+            "mileage_km": counter(obd.get("mileage")),
             "fuel_litres": obd.get("fuel_litres"),
             "fuel_percent": obd.get("fuel_percent"),
             "lat": position.get("y"),
             "lon": position.get("x"),
             "speed_kmh": position.get("s"),
-            "is_moving": bool(position.get("is_move")),
+            "is_moving": flag(position.get("is_move")),
             "gsm_lvl": common.get("gsm_lvl"),
             "battery_v": common.get("battery"),
-            "engine_on": bool(state.get("ign")),
-            "is_armed": bool(state.get("arm")),
+            "engine_on": flag(state.get("ign")),
+            "is_armed": flag(state.get("arm")),
             "ctemperature": common.get("ctemp"),
             "etemperature": common.get("etemp"),
-            "motohours_minutes": state.get("motohrs"),
+            "motohours_minutes": counter(state.get("motohrs")),
         }
+
+@lru_cache(maxsize=1)
+def cached_client(app_id, app_secret, login, password):
+    return StarLineClient(app_id, app_secret, login, password)
+
+
+def configured_client():
+    from app.config import settings
+    credentials = (settings.starline_app_id, settings.starline_app_secret,
+                   settings.starline_login, settings.starline_password)
+    if not all(credentials):
+        raise StarLineError("Подключите StarLine в настройках")
+    return cached_client(*credentials)

@@ -17,7 +17,7 @@
         </div>
         <div class="mb-4">
             <label class="block text-sm text-slate-400 mb-1">App Secret</label>
-            <input type="text" x-model="appSecret" class="input" placeholder="Секрет приложения">
+            <input type="password" x-model="appSecret" class="input" placeholder="Секрет приложения">
         </div>
         <div class="mb-4">
             <label class="block text-sm text-slate-400 mb-1">Логин StarLine Online</label>
@@ -35,6 +35,7 @@
             <input type="text" x-model="deviceId" class="input" placeholder="Например: AB1234CD5678EF90">
         </div>
 
+        <p class="text-sm text-slate-400 mb-4">После подключения настройки сохраняются на сервере и используются для автоматического сбора.</p>
         <button @click="connect()" :disabled="loading" class="btn-primary w-full"
                 x-text="loading ? 'Подключаюсь...' : '🔗 Подключить'">
         </button>

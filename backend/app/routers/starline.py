@@ -1,17 +1,20 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.user import User
 from app.models.car import Car, StarSnap
 from app.services.auth import get_current_user_from_cookie
-from app.services.starline import StarLineClient, StarLineError, API_BASE
-from app.config import settings
+from app.services.starline import StarLineClient, StarLineError
+from app.config import persist_settings
+
+from app.services.starline import configured_client, cached_client
+from app.services.collection import collect_snapshot, save_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +34,7 @@ async def starline_api_raw(
     user: User = Depends(get_current_user_from_cookie),
     db: AsyncSession = Depends(get_db),
 ):
-    """Выполнить произвольный запрос к StarLine API (тестовая консоль)."""
+    """Выполнить диагностический запрос для подключенного устройства."""
     try:
         result = await db.execute(
             select(Car).where(Car.user_id == user.id, Car.starline_device_id.isnot(None)).limit(1)
@@ -43,43 +46,40 @@ async def starline_api_raw(
         # Подставляем device_id в endpoint
         endpoint = req.endpoint.replace("{device_id}", car.starline_device_id)
 
-        from app.config import settings
-        client = StarLineClient(
-            settings.starline_app_id or "",
-            settings.starline_app_secret or "",
-            settings.starline_login or "",
-            settings.starline_password or "",
-        )
-        client.auth()
-
-        import httpx
-        url = f"{API_BASE}{endpoint}"
-        cookies = {"slnet": client._slnet_token}
-
-        if req.method.upper() == "GET":
-            resp = httpx.get(url, cookies=cookies, timeout=15)
-        elif req.method.upper() == "POST":
-            resp = httpx.post(url, cookies=cookies, json=req.body, timeout=15)
-        else:
-            return {"error": "Only GET/POST supported"}
+        # Only diagnostic reads for the connected device, including read-only POST endpoints.
+        allowed = {
+            ("GET", f"/json/v2/device/{car.starline_device_id}/state"),
+            ("GET", f"/json/v3/device/{car.starline_device_id}/data"),
+            ("GET", f"/json/v1/device/{car.starline_device_id}/position"),
+            ("GET", f"/json/device/{car.starline_device_id}/obd_params"),
+            ("GET", f"/json/v2/device/{car.starline_device_id}"),
+            ("POST", f"/json/v1/device/{car.starline_device_id}/getObdData"),
+            ("POST", f"/json/v2/device/{car.starline_device_id}/events"),
+        }
+        if (req.method.upper(), endpoint) not in allowed:
+            raise HTTPException(403, "Разрешены только диагностические запросы для подключенной машины")
+        client = configured_client()
+        resp = await client.api_request(req.method.upper(), endpoint,
+            **({"json": req.body} if req.method.upper() == "POST" else {}))
 
         try:
             json_data = resp.json()
-            logger.info("api-raw %s %s → %s", req.method, endpoint, str(json_data)[:500])
             return json_data
         except Exception:
             return {"raw": resp.text[:2000], "status": resp.status_code}
 
-    except Exception as e:
-        return {"error": str(e)}
+    except HTTPException:
+        raise
+    except StarLineError as e:
+        raise HTTPException(502, str(e))
 
 
 class StarLineConfig(BaseModel):
-    app_id: str
-    app_secret: str
-    login: str
-    password: str
-    device_id: Optional[str] = None  # можно указать вручную
+    app_id: str = Field(min_length=1)
+    app_secret: str = Field(min_length=1)
+    login: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+    device_id: Optional[str] = Field(default=None, pattern=r"^[A-Za-z0-9_-]+$")  # можно указать вручную
 
 
 @router.post("/connect")
@@ -90,8 +90,8 @@ async def connect_to_starline(
 ):
     """Подключить StarLine для текущего пользователя: авторизоваться, найти device_id."""
     try:
-        client = StarLineClient(body.app_id, body.app_secret, body.login, body.password)
-        slnet = client.auth()
+        client = cached_client(body.app_id, body.app_secret, body.login, body.password)
+        await client.ensure_auth()
 
         # Если device_id указан вручную — используем его
         if body.device_id:
@@ -99,14 +99,14 @@ async def connect_to_starline(
             device_name = "Car (manual)"
 
             # Проверим, что device_id валидный
-            data = client.get_device_data(device_id)
+            data = await client.get_device_data(device_id)
             obd = data.get("obd") or {}
             mileage = obd.get("mileage", "N/A")
             fuel = obd.get("fuel_litres", "N/A")
         else:
             # Автоопределение: найдём устройство
             try:
-                devices = client.get_user_devices()
+                devices = await client.get_user_devices()
             except StarLineError as e:
                 raise HTTPException(
                     status_code=400,
@@ -120,10 +120,10 @@ async def connect_to_starline(
                 )
 
             device = devices[0]
-            device_id = device.get("device_id")
+            device_id = str(device["device_id"])
             device_name = device.get("name") or device.get("alias") or device.get("typename") or "Car"
 
-            data = client.get_device_data(device_id)
+            data = await client.get_device_data(device_id)
             obd = data.get("obd") or {}
             mileage = obd.get("mileage", "N/A")
             fuel = obd.get("fuel_litres", "N/A")
@@ -132,6 +132,8 @@ async def connect_to_starline(
         result = await db.execute(select(Car).where(Car.user_id == user.id).limit(1))
         car = result.scalar_one_or_none()
 
+        if car and car.starline_device_id and car.starline_device_id != str(device_id):
+            raise HTTPException(409, "Нельзя заменить устройство у машины с историей ТО")
         if car:
             car.starline_device_id = device_id
             car.name = device_name  # обновляем имя при повторном подключении
@@ -144,20 +146,21 @@ async def connect_to_starline(
             )
             db.add(car)
 
-        await db.commit()
-        await db.refresh(car)
+        await db.flush()
+
+        persist_settings({
+            "starline_app_id": body.app_id, "starline_app_secret": body.app_secret,
+            "starline_login": body.login, "starline_password": body.password,
+        })
 
         # Сохраняем первый снепшот
         snapshot = StarLineClient.parse_snapshot(data)
-        snap = StarSnap(car_id=car.id, **snapshot)
-        db.add(snap)
-
         # Автоустановка начальных моточасов при первом подключении
         if car.initial_motohours == 0 and snapshot.get("motohours_minutes"):
             car.initial_motohours = snapshot["motohours_minutes"]
 
         await db.commit()
-        await db.refresh(snap)
+        await save_snapshot(db, car.id, snapshot)
 
         return {
             "ok": True,
@@ -170,6 +173,8 @@ async def connect_to_starline(
 
     except StarLineError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except OSError as e:
+        raise HTTPException(500, "Не удалось сохранить настройки подключения на сервере") from e
 
 
 @router.post("/fetch")
@@ -186,56 +191,10 @@ async def fetch_data(
     if not car:
         raise HTTPException(status_code=400, detail="No StarLine-connected car found. Call /connect first.")
 
-    # Берём credentials из .env
-    if not settings.starline_app_id:
-        raise HTTPException(status_code=400, detail="StarLine not configured in .env")
-
-    client = StarLineClient(
-        settings.starline_app_id,
-        settings.starline_app_secret,
-        settings.starline_login or "",
-        settings.starline_password or "",
-    )
-
     try:
-        data = client.get_device_data(car.starline_device_id)
-        snapshot = StarLineClient.parse_snapshot(data)
-
-        # Если mileage нет в OBD — пробуем через getObdData (CAN-пробег)
-        if snapshot["mileage_km"] is None:
-            try:
-                obd_data = client.get_obd_data(car.starline_device_id)
-                if isinstance(obd_data, dict):
-                    obd_result = obd_data.get("data") or obd_data.get("result") or obd_data
-                    if isinstance(obd_result, list) and len(obd_result) > 0:
-                        last = obd_result[-1]
-                        snapshot["mileage_km"] = last.get("mileage") or last.get("value") or last.get("odometer")
-                    elif isinstance(obd_result, dict):
-                        snapshot["mileage_km"] = obd_result.get("mileage") or obd_result.get("value") or obd_result.get("odometer")
-            except Exception as e:
-                logger.warning("getObdData failed: %s", e)
-
-        # Если всё ещё нет — пробуем через position
-        if snapshot["mileage_km"] is None:
-            try:
-                pos_data = client.get_last_position(car.starline_device_id)
-            except Exception as e:
-                logger.warning("getPosition failed: %s", e)
-
-        # Если моточасы из state.motohrs не пришли — считаем через события
-        if snapshot["motohours_minutes"] is None:
-            try:
-                mh = client.get_engine_hours_from_events(car.starline_device_id, days=30)
-                snapshot["motohours_minutes"] = mh["motohours_minutes"]
-                logger.info("Motohours from events: %d min (on=%d, off=%d)",
-                    mh["motohours_minutes"], mh["ign_on_count"], mh["ign_off_count"])
-            except Exception as e:
-                logger.warning("getEngineHours failed: %s", e)
-
-        snap = StarSnap(car_id=car.id, **snapshot)
-        db.add(snap)
-        await db.commit()
-        await db.refresh(snap)
+        client = configured_client()
+        snapshot = await collect_snapshot(client, car.starline_device_id)
+        snap = await save_snapshot(db, car.id, snapshot)
 
         return {"ok": True, "snap_id": snap.id, "data": {
             "ts": snapshot["ts"].isoformat(),
@@ -258,13 +217,13 @@ async def test_device(
 ):
     """Проверить, работает ли device_id: авторизоваться и попробовать получить данные."""
     try:
-        client = StarLineClient(body.app_id, body.app_secret, body.login, body.password)
-        client.auth()
+        client = cached_client(body.app_id, body.app_secret, body.login, body.password)
+        await client.ensure_auth()
 
         if not body.device_id:
             return {"ok": False, "error": "No device_id provided"}
 
-        data = client.get_device_data(body.device_id)
+        data = await client.get_device_data(body.device_id)
         obd = data.get("obd") or {}
         position = data.get("position") or {}
         common = data.get("common") or {}
@@ -312,7 +271,7 @@ async def status(
         "car_id": car.id,
         "car_name": car.name,
         "device_id": car.starline_device_id,
-        "snaps_count": len(car.snaps) if car.snaps else 0,
+        "snaps_count": await db.scalar(select(func.count()).select_from(StarSnap).where(StarSnap.car_id == car.id)),
     }
 
 
@@ -331,8 +290,8 @@ async def reset_motohours(
 
     # Получаем текущие моточасы из последнего снепшота
     snap_result = await db.execute(
-        select(StarSnap).where(StarSnap.car_id == car.id)
-        .order_by(StarSnap.ts.desc()).limit(1)
+        select(StarSnap).where(StarSnap.car_id == car.id, StarSnap.motohours_minutes.isnot(None))
+        .order_by(StarSnap.ts.desc(), StarSnap.id.desc()).limit(1)
     )
     snap = snap_result.scalar_one_or_none()
     if not snap or snap.motohours_minutes is None:

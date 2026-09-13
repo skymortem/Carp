@@ -100,7 +100,7 @@
                     <input type="number" x-model="complete.mileage_km" class="input text-sm" placeholder="Текущий">
                 </div>
                 <div>
-                    <label class="block text-xs text-slate-400 mb-1">Моточасы</label>
+                    <label class="block text-xs text-slate-400 mb-1">Накопительные моточасы (ч)</label>
                     <input type="number" x-model="complete.motohours" class="input text-sm" placeholder="Текущие">
                 </div>
                 <div>
@@ -122,7 +122,7 @@
     {% if plans %}
     <div class="space-y-3">
         {% for p in plans %}
-        <div class="card p-4 flex items-center justify-between {% if p.overdue %}border-l-4 border-l-red-500{% elif not p.active %}border-l-4 border-l-slate-600{% endif %}">
+        <div class="card p-4 flex items-center justify-between {% if p.overdue %}border-l-4 border-l-red-500{% elif p.urgent %}border-l-4 border-l-amber-500{% elif not p.active %}border-l-4 border-l-slate-600{% endif %}">
             <div class="flex-1">
                 <div class="font-bold">{{ p.name }}</div>
                 <div class="text-sm text-slate-400 mt-1">
@@ -141,6 +141,8 @@
                 </div>
                 {% if p.overdue %}
                 <div class="text-sm text-red-400 font-bold mt-1">⚠️ {{ p.status }}</div>
+                {% elif p.urgent %}
+                <div class="text-sm text-amber-400 mt-1">Скоро ТО: {{ p.status }}</div>
                 {% elif p.active %}
                 <div class="text-sm text-slate-500 mt-1">Осталось: {{ p.status }}</div>
                 {% endif %}
@@ -149,7 +151,7 @@
                 {% endif %}
             </div>
             <div class="ml-4 shrink-0 flex gap-2">
-                <button @click="edit($el.dataset)" :data-id="{{ p.id }}" :data-name="'{{ p.name|e }}'" data-interval_km="{{ p.interval_km or '' }}" data-interval_months="{{ p.interval_months or '' }}" data-interval_motohours="{{ p.interval_motohours or '' }}" :data-notes="'{{ p.notes|e|default('') }}'" class="text-slate-400 text-sm hover:text-white">✎</button>
+                <button @click="edit($el.dataset)" data-id="{{ p.id }}" data-name="{{ p.name }}" data-interval_km="{{ p.interval_km or '' }}" data-interval_months="{{ p.interval_months or '' }}" data-interval_motohours="{{ p.interval_motohours or '' }}" data-notes="{{ p.notes or '' }}" class="text-slate-400 text-sm hover:text-white">✎</button>
                 <button @click="remove({{ p.id }})" class="text-red-400 text-sm hover:text-red-300">✕</button>
             </div>
         </div>
@@ -177,6 +179,7 @@
                         <th class="text-left py-2">Дата</th>
                         <th class="text-left py-2">Операция</th>
                         <th class="text-right py-2">Пробег</th>
+                        <th class="text-right py-2">Моточасы</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -184,7 +187,8 @@
                         <tr class="border-b border-slate-800">
                             <td class="py-2" x-text="h.done_at"></td>
                             <td class="py-2" x-text="h.plan_name"></td>
-                            <td class="py-2 text-right" x-text="h.mileage_km ? h.mileage_km + ' км' : '—'"></td>
+                            <td class="py-2 text-right" x-text="h.mileage_km != null ? h.mileage_km + ' км' : '—'"></td>
+                            <td class="py-2 text-right" x-text="h.motohours"></td>
                         </tr>
                     </template>
                 </tbody>
@@ -203,12 +207,15 @@ function servicePlan() {
         form: { name: '', interval_km: null, interval_months: null, interval_motohours: null, notes: '' },
         editForm: { show: false, id: null, name: '', interval_km: null, interval_months: null, interval_motohours: null, notes: '', loading: false, msg: '', err: false },
         complete: { ids: [], mileage_km: null, motohours: null, date: '', loading: false, msg: '', err: false },
+        optionalNumber(value) {
+            return value === '' || value === null || value === undefined ? null : Number(value);
+        },
         async save() {
             this.message = ''; this.error = false;
             try {
                 const r = await fetch('/service-plan/add', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(this.form)
+                    body: JSON.stringify({...this.form, interval_km: this.optionalNumber(this.form.interval_km), interval_months: this.optionalNumber(this.form.interval_months), interval_motohours: this.optionalNumber(this.form.interval_motohours)})
                 });
                 const d = await r.json();
                 if (d.ok) location.reload();
@@ -222,8 +229,8 @@ function servicePlan() {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         plan_ids: this.complete.ids,
-                        mileage_km: this.complete.mileage_km || null,
-                        motohours: this.complete.motohours || null,
+                        mileage_km: this.optionalNumber(this.complete.mileage_km),
+                        motohours: this.optionalNumber(this.complete.motohours),
                         date: this.complete.date || null,
                     })
                 });
@@ -257,9 +264,9 @@ function servicePlan() {
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         name: this.editForm.name,
-                        interval_km: this.editForm.interval_km || null,
-                        interval_months: this.editForm.interval_months || null,
-                        interval_motohours: this.editForm.interval_motohours || null,
+                        interval_km: this.optionalNumber(this.editForm.interval_km),
+                        interval_months: this.optionalNumber(this.editForm.interval_months),
+                        interval_motohours: this.optionalNumber(this.editForm.interval_motohours),
                         notes: this.editForm.notes || '',
                     })
                 });

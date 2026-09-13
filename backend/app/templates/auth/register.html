@@ -5,7 +5,7 @@
     <h2 class="text-2xl font-bold mb-6">Регистрация</h2>
     <form x-data="{ email: '', username: '', password: '', errmsg: '' }" @submit.prevent="
         fetch('/auth/register', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email, username, password})})
-        .then(r=>r.json()).then(d=>{ if(d.ok) { document.cookie='access_token='+d.token+';path=/'; window.location='/dashboard'; } else { errmsg=d.detail; }})
+        .then(r=>r.json()).then(d=>{ if(d.ok) { window.location='/dashboard'; } else { errmsg=d.detail; }})
     ">
         <div class="mb-4">
             <label class="block text-sm text-slate-400 mb-1">Имя</label>

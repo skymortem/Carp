@@ -25,3 +25,5 @@ Thumbs.db
 # StarLine sensitive (if committed by accident)
 *.pem
 *.key
+# Test tooling
+.pytest_cache/
