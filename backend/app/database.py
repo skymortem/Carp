@@ -20,5 +20,11 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db():
+    """Создать схему напрямую из моделей.
+
+    Приложение этим больше не пользуется: схема живёт в alembic/versions
+    и применяется app.migrations.run_migrations() при старте. Функция
+    оставлена для тестов и разовых скриптов, где миграции избыточны.
+    """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

@@ -2,12 +2,19 @@
 {% block title %}Дашборд — Carp{% endblock %}
 {% block content %}
 <div x-data="dashboard()">
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
         <h1 class="text-2xl font-bold">
             📊 Дашборд
             {% if car and car.name %}<span class="text-lg text-slate-400 ml-2 font-normal">{{ car.name }}</span>{% endif %}
         </h1>
-        <div class="flex gap-2">
+        <div class="flex items-center gap-4">
+            {% if freshness %}
+            <div class="flex items-center gap-2 text-sm" title="Интервал фонового сбора: {{ collect_interval_minutes }} мин">
+                <span class="inline-block w-2.5 h-2.5 rounded-full {{ {'ok': 'bg-green-500', 'late': 'bg-amber-400', 'stale': 'bg-red-500', 'never': 'bg-slate-500'}[freshness.state] }}"></span>
+                <span class="text-slate-300" x-text="freshnessText">{{ freshness.age_text }}</span>
+                <span class="text-slate-500 hidden sm:inline">· сбор раз в {{ collect_interval_minutes }} мин</span>
+            </div>
+            {% endif %}
             {% if starline_connected %}
                 <button @click="fetchStarLine()" :disabled="loading"
                         class="btn-primary text-sm" x-text="loading ? 'Загрузка...' : '🔄 Собрать сейчас'">
@@ -15,6 +22,17 @@
             {% endif %}
         </div>
     </div>
+
+    {% if freshness and freshness.state in ('stale', 'never') and starline_connected %}
+    <div class="card p-4 mb-6 border border-red-700/50 bg-red-900/20">
+        <div class="text-sm">
+            <span class="font-bold text-red-400">Данные не обновляются.</span>
+            Последний снимок: {{ freshness.age_text }}. Проверь подключение StarLine на
+            <a href="/setup" class="text-blue-400 hover:text-blue-300">странице настроек</a>
+            и кнопку «Собрать сейчас».
+        </div>
+    </div>
+    {% endif %}
 
     <!-- Индикаторы -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
@@ -49,9 +67,12 @@
     {% endif %}
 
     <!-- График пробега по месяцам -->
-    {% if snaps_reversed|length > 1 %}
+    {% if snap_count > 1 %}
     <div class="card p-6 mb-6">
-        <h3 class="font-bold mb-4">📈 Изменение пробега по месяцам (до 2000 последних снимков)</h3>
+        <div class="flex flex-wrap items-baseline justify-between gap-2 mb-4">
+            <h3 class="font-bold">📈 Пробег по месяцам</h3>
+            <span class="text-xs text-slate-500" id="seriesInfo">загрузка…</span>
+        </div>
         <canvas id="mileageChart" height="100"></canvas>
     </div>
     {% endif %}
@@ -75,7 +96,10 @@
     <!-- Последние записи -->
     {% if snaps %}
     <div class="card p-6">
-        <h3 class="font-bold mb-4">📋 Последние записи</h3>
+        <div class="flex flex-wrap items-baseline justify-between gap-2 mb-4">
+            <h3 class="font-bold">📋 Последние записи</h3>
+            <span class="text-xs text-slate-500">всего снимков: {{ snap_count }}</span>
+        </div>
         <div class="overflow-x-auto">
             <table class="w-full text-sm">
                 <thead>
@@ -88,7 +112,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {% for snap in snaps[:20] %}
+                    {% for snap in snaps %}
                     <tr class="border-b border-slate-800">
                         <td class="py-2">{{ snap.ts[:16].replace('T', ' ') if snap.ts else '—' }}</td>
                         <td class="text-right">{{ snap.mileage_km if snap.mileage_km is not none else '—' }}</td>
@@ -107,20 +131,32 @@
 
 {% block scripts %}
 <script>
-    const snaps = {{ snaps_reversed|tojson }};
+    const latestSnap = {{ latest|tojson }};
+    const freshnessState = {
+        lastTs: {{ (freshness.last_ts.isoformat() if freshness and freshness.last_ts else None)|tojson }},
+    };
 
     function dashboard() {
         return {
             currentKm: {{ current_km|tojson }},
             currentMh: {{ current_mh|tojson }},
             loading: false,
-            latest: snaps.length > 0 ? snaps[snaps.length - 1] : null,
+            latest: latestSnap,
+            freshnessText: {{ (freshness.age_text if freshness else 'нет данных')|tojson }},
             get motohoursDisplay() {
                 const m = this.currentMh;
                 if (m === null || m === undefined) return '—';
                 const h = Math.floor(m / 60);
                 const min = m % 60;
                 return h + 'ч ' + min + 'м';
+            },
+            init() {
+                // Возраст данных тикает сам — иначе «5 мин назад» врёт через час.
+                if (!freshnessState.lastTs) return;
+                const last = new Date(freshnessState.lastTs);
+                const tick = () => { this.freshnessText = humanizeAge(last); };
+                tick();
+                setInterval(tick, 30000);
             },
             async fetchStarLine() {
                 this.loading = true;
@@ -135,54 +171,79 @@
         };
     }
 
-    document.addEventListener('DOMContentLoaded', function() {
-        // График пробега по месяцам
-        const mileCtx = document.getElementById('mileageChart');
-        if (mileCtx) {
-            // Группируем снепшоты по месяцам
-            const monthMap = {};
-            for (const s of snaps) {
-                if (s.mileage_km === null) continue;
-                const d = new Date(s.ts);
-                const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-                if (!monthMap[key]) monthMap[key] = {first: s.mileage_km, last: s.mileage_km};
-                else monthMap[key].last = s.mileage_km;
-            }
-            // Считаем пробег за месяц = max - min
-            const labels = [], data = [];
-            const sorted = Object.entries(monthMap).sort((a, b) => a[0].localeCompare(b[0]));
-            for (const [key, val] of sorted) {
-                const [y, m] = key.split('-');
-                const months = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
-                labels.push(months[parseInt(m) - 1] + ' ' + y);
-                data.push(val.last - val.first);
-            }
+    function humanizeAge(last) {
+        const minutes = Math.max(0, Math.floor((Date.now() - last.getTime()) / 60000));
+        if (minutes < 60) return minutes + ' мин назад';
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return hours + ' ч назад';
+        return Math.floor(hours / 24) + ' дн назад';
+    }
 
-            new Chart(mileCtx, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Пробег (км)',
-                        data: data,
-                        backgroundColor: 'rgba(59,130,246,0.7)',
-                        borderColor: '#3b82f6',
-                        borderWidth: 1,
-                        borderRadius: 4,
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    plugins: {
-                        legend: { labels: { color: '#94a3b8' } },
-                    },
-                    scales: {
-                        x: { ticks: { color: '#64748b' } },
-                        y: { ticks: { color: '#64748b', beginAtZero: true } }
-                    }
-                }
-            });
+    document.addEventListener('DOMContentLoaded', async function() {
+        const mileCtx = document.getElementById('mileageChart');
+        if (!mileCtx) return;
+
+        let payload;
+        try {
+            const r = await fetch('/api/series?days=3650');
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            payload = await r.json();
+        } catch (e) {
+            document.getElementById('seriesInfo').textContent = 'не удалось загрузить историю';
+            return;
         }
+
+        const points = payload.points || [];
+        if (points.length < 2) {
+            document.getElementById('seriesInfo').textContent = 'недостаточно данных для графика';
+            return;
+        }
+
+        // Дневные агрегаты → месяцы: сумма суточных пробегов (max - min внутри дня).
+        // Корректнее, чем «последний минус первый», когда в месяце есть пропуски сбора.
+        const months = {};
+        for (const p of points) {
+            if (p.mileage_max == null || p.mileage_min == null) continue;
+            const key = p.d.slice(0, 7);
+            months[key] = (months[key] || 0) + (p.mileage_max - p.mileage_min);
+        }
+
+        const labels = [], data = [];
+        const names = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+        for (const key of Object.keys(months).sort()) {
+            const [y, m] = key.split('-');
+            labels.push(names[parseInt(m, 10) - 1] + ' ' + y);
+            data.push(months[key]);
+        }
+
+        document.getElementById('seriesInfo').textContent =
+            'история: ' + points[0].d + ' … ' + points[points.length - 1].d +
+            ' (' + points.length + ' дн с данными)';
+
+        new Chart(mileCtx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Пробег (км)',
+                    data: data,
+                    backgroundColor: 'rgba(59,130,246,0.7)',
+                    borderColor: '#3b82f6',
+                    borderWidth: 1,
+                    borderRadius: 4,
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { labels: { color: '#94a3b8' } },
+                },
+                scales: {
+                    x: { ticks: { color: '#64748b' } },
+                    y: { ticks: { color: '#64748b', beginAtZero: true } }
+                }
+            }
+        });
     });
 </script>
 {% endblock %}

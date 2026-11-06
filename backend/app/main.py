@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.database import init_db
+from app.migrations import run_migrations
 from app.routers import auth, starline, dashboard, service_plan
 from app.services.scheduler import start as start_scheduler, stop as stop_scheduler
 
@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting up — creating tables if needed...")
-    await init_db()
+    logger.info("Starting up — applying migrations...")
+    await run_migrations()
     start_scheduler()
     logger.info("DB ready! Scheduler active.")
     yield

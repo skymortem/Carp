@@ -11,10 +11,11 @@ from app.models.user import User
 from app.models.car import Car, StarSnap
 from app.services.auth import get_current_user_from_cookie
 from app.services.starline import StarLineClient, StarLineError
-from app.config import persist_settings
+from app.config import persist_settings, settings
 
 from app.services.starline import configured_client, cached_client
 from app.services.collection import collect_snapshot, save_snapshot
+from app.services.freshness import describe_freshness, last_snapshot_ts
 
 logger = logging.getLogger(__name__)
 
@@ -266,12 +267,23 @@ async def status(
     if not car:
         return {"connected": False}
 
+    freshness = describe_freshness(
+        await last_snapshot_ts(db, car.id), settings.collect_interval_minutes
+    )
     return {
         "connected": True,
         "car_id": car.id,
         "car_name": car.name,
         "device_id": car.starline_device_id,
         "snaps_count": await db.scalar(select(func.count()).select_from(StarSnap).where(StarSnap.car_id == car.id)),
+        "last_snap_ts": freshness["last_ts"].isoformat() if freshness["last_ts"] else None,
+        "collect_interval_minutes": freshness["interval_minutes"],
+        "freshness": {
+            "state": freshness["state"],
+            "label": freshness["label"],
+            "age_minutes": freshness["age_minutes"],
+            "age_text": freshness["age_text"],
+        },
     }
 
 

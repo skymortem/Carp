@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boolean, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -32,6 +32,13 @@ class Car(Base):
 class StarSnap(Base):
     """Слепок данных со StarLine в момент времени"""
     __tablename__ = "star_snaps"
+
+    # Композитный индекс объявлен и в модели, и в миграции 0002: без этого
+    # alembic --autogenerate считает существующий индекс «лишним» и предлагает
+    # его удалить (индекс есть в базе, но не в metadata).
+    __table_args__ = (
+        Index("ix_star_snaps_car_id_ts", "car_id", "ts"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     car_id = Column(Integer, ForeignKey("cars.id"), nullable=False, index=True)
