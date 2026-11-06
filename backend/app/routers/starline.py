@@ -48,17 +48,36 @@ async def starline_api_raw(
         endpoint = req.endpoint.replace("{device_id}", car.starline_device_id)
 
         # Only diagnostic reads for the connected device, including read-only POST endpoints.
+        # Управляющие команды (set_param, async, controls, settings/*) сюда не входят
+        # намеренно: консоль — инструмент диагностики, а не пульт от машины.
+        device = car.starline_device_id
         allowed = {
-            ("GET", f"/json/v2/device/{car.starline_device_id}/state"),
-            ("GET", f"/json/v3/device/{car.starline_device_id}/data"),
-            ("GET", f"/json/v1/device/{car.starline_device_id}/position"),
-            ("GET", f"/json/device/{car.starline_device_id}/obd_params"),
-            ("GET", f"/json/v2/device/{car.starline_device_id}"),
-            ("POST", f"/json/v1/device/{car.starline_device_id}/getObdData"),
-            ("POST", f"/json/v2/device/{car.starline_device_id}/events"),
+            ("GET", f"/json/v2/device/{device}/state"),
+            ("GET", f"/json/v3/device/{device}/data"),
+            ("GET", f"/json/v1/device/{device}/position"),
+            ("GET", f"/json/v2/device/{device}"),
+            ("GET", f"/json/device/{device}/obd_params"),
+            ("GET", f"/json/device/{device}/obd_errors"),
+            ("GET", f"/json/device/{device}/ctrls_library"),
+            ("GET", f"/json/v4/device/{device}/settings"),
+            ("POST", f"/json/v1/device/{device}/getObdData"),
+            ("POST", f"/json/v1/device/{device}/details"),
+            ("POST", f"/json/v2/device/{device}/events"),
+            ("POST", f"/json/v2/device/{device}/driving_score"),
+            ("POST", f"/json/v2/device/{device}/driving_score_history"),
+            ("POST", f"/json/v1/device/{device}/ways"),
+            # Справочник типов событий — общий, без привязки к устройству.
+            ("GET", "/json/v3/library/events"),
         }
         if (req.method.upper(), endpoint) not in allowed:
-            raise HTTPException(403, "Разрешены только диагностические запросы для подключенной машины")
+            raise HTTPException(
+                403,
+                "Разрешены только диагностические запросы для подключённой машины: "
+                "data, state, position, obd_params, obd_errors, ctrls_library, "
+                "getObdData, details, events, driving_score, driving_score_history, "
+                "ways, settings (чтение), справочник /json/v3/library/events. "
+                "Команды управления не выполняются.",
+            )
         client = configured_client()
         resp = await client.api_request(req.method.upper(), endpoint,
             **({"json": req.body} if req.method.upper() == "POST" else {}))
