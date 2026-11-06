@@ -1,21 +1,25 @@
-from datetime import timezone
+from datetime import timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import select, desc
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.models.user import User
 from app.models.car import Car, StarSnap, ServicePlan
 from app.services.auth import get_current_user_from_cookie, maybe_user
+from app.services.freshness import car_freshness, naive_utcnow
 
 from app.services.maintenance import current_readings, plan_status
 
 router = APIRouter(tags=["pages"])
+
+RECENT_SNAPS_LIMIT = 20
 
 templates_dir = Path(__file__).resolve().parent.parent / "templates"
 jinja_env = Environment(
@@ -43,20 +47,30 @@ async def dashboard_page(
     user: User = Depends(get_current_user_from_cookie),
     db: AsyncSession = Depends(get_db),
 ):
-    """Дашборд с графиками и данными."""
+    """Дашборд: последние показания, свежесть сбора, план ТО.
+
+    В шаблон уходят только 20 последних снимков (таблица). Графики строятся
+    из /api/series по агрегатам — иначе каждый рендер тянул 2000 строк
+    и история обрывалась на 2000-м снимке (~83 дня при сборе раз в час).
+    """
     result = await db.execute(select(Car).where(Car.user_id == user.id).limit(1))
     car = result.scalar_one_or_none()
 
     snaps = []
-    snaps_reversed = []
+    latest = None
+    snap_count = 0
     service_plans = []
     starline_connected = False
     current_km = current_mh = None
+    freshness = None
 
     if car:
+        snap_count = await db.scalar(
+            select(func.count()).select_from(StarSnap).where(StarSnap.car_id == car.id)
+        ) or 0
         result = await db.execute(
             select(StarSnap).where(StarSnap.car_id == car.id)
-            .order_by(desc(StarSnap.ts), desc(StarSnap.id)).limit(2000)
+            .order_by(desc(StarSnap.ts), desc(StarSnap.id)).limit(RECENT_SNAPS_LIMIT)
         )
         snaps_orm = result.scalars().all()
         snaps = [
@@ -81,8 +95,9 @@ async def dashboard_page(
             }
             for s in snaps_orm
         ]
-        snaps_reversed = list(reversed(snaps))
+        latest = snaps[0] if snaps else None
         starline_connected = bool(car.starline_device_id)
+        freshness = await car_freshness(db, car.id)
 
         current_km, current_mh = await current_readings(db, car.id)
         plan_result = await db.execute(select(ServicePlan).where(ServicePlan.car_id == car.id))
@@ -96,11 +111,71 @@ async def dashboard_page(
         service_plans.sort(key=lambda x: (not x["urgent"], x["name"]))
 
     return HTMLResponse(render("dashboard.html", request=request,
-        user=user, car=car, snaps=snaps,
-        snaps_reversed=snaps_reversed, starline_connected=starline_connected,
+        user=user, car=car, snaps=snaps, latest=latest, snap_count=snap_count,
+        freshness=freshness, starline_connected=starline_connected,
         initial_motohours=getattr(car, "initial_motohours", 0) if car else 0,
         motohours_reset_at=getattr(car, "motohours_reset_at", None) if car else None,
-        service_plans=service_plans, current_km=current_km, current_mh=current_mh))
+        service_plans=service_plans, current_km=current_km, current_mh=current_mh,
+        collect_interval_minutes=settings.collect_interval_minutes))
+
+
+@router.get("/api/series")
+async def series(
+    days: int = Query(365, ge=1, le=36500, description="Глубина истории в днях"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user_from_cookie),
+):
+    """Дневные агрегаты снимков для графиков.
+
+    Раньше дашборд встраивал 2000 последних снимков прямо в HTML: страница
+    тяжелела, а история молча обрывалась на 2000-й записи (~83 дня при
+    сборе раз в час). Здесь агрегация выполняется базой, поэтому глубина
+    ограничена только сроком хранения данных.
+
+    Границы суток — UTC (в SQLite `date(ts)` от строки без таймзоны),
+    поэтому для UTC+6 «сегодня» может включать раннее утро.
+    """
+    car = await db.scalar(select(Car).where(Car.user_id == user.id).limit(1))
+    if car is None:
+        raise HTTPException(status_code=404, detail="Машина не найдена")
+
+    since = naive_utcnow() - timedelta(days=days)
+    day = func.date(StarSnap.ts).label("d")
+    rows = (await db.execute(
+        select(
+            day,
+            func.min(StarSnap.mileage_km).label("m_min"),
+            func.max(StarSnap.mileage_km).label("m_max"),
+            func.avg(StarSnap.fuel_litres).label("fuel_avg"),
+            func.avg(StarSnap.speed_kmh).label("speed_avg"),
+            func.count().label("n"),
+        )
+        .where(StarSnap.car_id == car.id, StarSnap.ts >= since)
+        .group_by(day)
+        .order_by(day)
+    )).all()
+
+    points = [
+        {
+            "d": row.d,
+            "mileage_min": row.m_min,
+            "mileage_max": row.m_max,
+            "fuel_avg": round(row.fuel_avg, 2) if row.fuel_avg is not None else None,
+            "speed_avg": round(row.speed_avg, 1) if row.speed_avg is not None else None,
+            "n": row.n,
+        }
+        for row in rows
+        if row.d
+    ]
+
+    return {
+        "car_id": car.id,
+        "days": days,
+        "bucket": "day",
+        "timezone": "UTC",
+        "points": points,
+        "total_points": len(points),
+    }
 
 
 @router.get("/login", response_class=HTMLResponse)

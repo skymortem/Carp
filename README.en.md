@@ -45,7 +45,23 @@ Instead of manually punching numbers into a spreadsheet, Carp fetches real telem
 | **Charts** | Chart.js 4.x |
 | **Auth** | JWT (python-jose) + bcrypt |
 | **External API** | StarLine (SLID + WebAPI via httpx) |
-| **Migrations** | Alembic (planned) |
+| **Migrations** | Alembic (applied automatically on startup) |
+
+### Database migrations
+
+The schema lives in `backend/alembic/versions/`; `alembic upgrade head` runs at startup, so a restart is enough after pulling new code. An installation created by an older version (tables present, no `alembic_version`) is stamped as `0001_baseline` on first start and then brought to head — existing rows are untouched. To add a migration:
+
+```bash
+cd backend
+alembic revision --autogenerate -m "short description"
+alembic upgrade head
+```
+
+`render_as_batch=True` is enabled in `alembic/env.py` because SQLite cannot `ALTER`/`DROP COLUMN` without recreating the table. Back the database up before updating anyway.
+
+### Data freshness
+
+The dashboard header shows how old the newest snapshot is, derived from `COLLECT_INTERVAL_MINUTES`: green up to 1.5 intervals, amber up to 3, red (with a warning banner) beyond that. The same data is exposed in `GET /starline/status`. Charts are built from daily aggregates served by `GET /api/series?days=N`, so history is no longer truncated at the last 2000 snapshots.
 
 ---
 
