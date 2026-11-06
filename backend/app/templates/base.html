@@ -2,8 +2,18 @@
 <html lang="ru" data-theme="dark">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0e1116">
     <title>{% block title %}Carp{% endblock %}</title>
+    <!-- «Добавить на экран Домой» в Safari: standalone-режим без адресной строки -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Carp">
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
@@ -42,7 +52,18 @@
             --accent: #4f8cff;
             --accent-hover: #3c78e8;
         }
-        body { background: var(--bg); color: var(--ink); }
+        body {
+            background: var(--bg); color: var(--ink);
+            /* standalone на iPhone: не залезать под «чёлку» и home-бар */
+            padding-top: 0;
+            padding-top: env(safe-area-inset-top);
+            padding-bottom: 0;
+            padding-bottom: env(safe-area-inset-bottom);
+            padding-left: 0;
+            padding-left: env(safe-area-inset-left);
+            padding-right: 0;
+            padding-right: env(safe-area-inset-right);
+        }
         .card { background: var(--surface); border: 1px solid var(--line); border-radius: 0.625rem; }
         .btn-primary {
             background: var(--accent); color: #fff; padding: 0.5rem 1rem;
@@ -63,9 +84,9 @@
     </style>
 </head>
 <body class="min-h-screen">
-    <nav class="border-b border-slate-700/50 px-6 py-3 flex items-center justify-between">
-        <a href="/" class="text-xl font-bold text-blue-400">🚗 Carp</a>
-        <div class="flex items-center gap-4 text-sm">
+    <nav class="border-b border-slate-700/50 px-6 py-3 flex items-center justify-between gap-3">
+        <a href="/" class="text-xl font-bold text-blue-400 shrink-0">🚗 Carp</a>
+        <div class="flex items-center gap-4 text-sm overflow-x-auto whitespace-nowrap min-w-0">
             {% if user %}
                 <span class="text-slate-400">{{ user.username }}</span>
                 <a href="/dashboard" class="text-slate-300 hover:text-white">Дашборд</a>
@@ -91,6 +112,14 @@
                 window.location.href = '/login';
             }
         });
+
+        // Service worker: мгновенная статика и понятная заглушка без сети.
+        // Регистрация не критична — при любой ошибке приложение работает как обычно.
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+                navigator.serviceWorker.register('/sw.js').catch(function() {});
+            });
+        }
     </script>
     {% block scripts %}{% endblock %}
 </body>
