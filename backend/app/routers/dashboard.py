@@ -11,13 +11,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.models.user import User
-from app.models.car import Car, StarSnap, ServicePlan
+from app.models.car import Car, DeviceSettings, ObdError, StarSnap, ServicePlan
 from app.services.auth import get_current_user_from_cookie, maybe_user
 from app.services.freshness import car_freshness, naive_utcnow
 
 from app.services.maintenance import current_readings, plan_status
 
 router = APIRouter(tags=["pages"])
+
+def describe_battery(raw_value, raw_type) -> Optional[dict]:
+    """АКБ: StarLine отдаёт либо вольты, либо проценты.
+
+    В ответах API встречается процент, помеченный как "volt" (например 66
+    при battery_type=volt), поэтому решаем по величине: в 12-вольтовой сети
+    не бывает больше ~20, всё выше — проценты.
+    """
+    if raw_value is None:
+        return None
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return None
+
+    if str(raw_type or "").lower() == "percent" or value > 20:
+        return {"value": int(round(value)), "unit": "%", "low": value < 30, "kind": "percent"}
+    return {"value": round(value, 1), "unit": "В", "low": value < 11.8, "kind": "volt"}
+
 
 RECENT_SNAPS_LIMIT = 20
 
@@ -63,6 +82,9 @@ async def dashboard_page(
     starline_connected = False
     current_km = current_mh = None
     freshness = None
+    battery = None
+    device_settings = None
+    obd_errors = []
 
     if car:
         snap_count = await db.scalar(
@@ -86,6 +108,8 @@ async def dashboard_page(
                 "is_armed": s.is_armed,
                 "gsm_lvl": s.gsm_lvl,
                 "battery_v": s.battery_v,
+                "battery_type": s.battery_type,
+                "outside_temp": s.outside_temp,
                 "ctemperature": s.ctemperature,
                 "etemperature": s.etemperature,
                 "motohours_minutes": s.motohours_minutes,
@@ -98,6 +122,16 @@ async def dashboard_page(
         latest = snaps[0] if snaps else None
         starline_connected = bool(car.starline_device_id)
         freshness = await car_freshness(db, car.id)
+        battery = describe_battery(latest.get("battery_v"), latest.get("battery_type")) if latest else None
+
+        device_settings = await db.scalar(
+            select(DeviceSettings).where(DeviceSettings.car_id == car.id)
+        )
+        obd_errors = (await db.execute(
+            select(ObdError)
+            .where(ObdError.car_id == car.id, ObdError.is_active.is_(True))
+            .order_by(ObdError.first_seen)
+        )).scalars().all()
 
         current_km, current_mh = await current_readings(db, car.id)
         plan_result = await db.execute(select(ServicePlan).where(ServicePlan.car_id == car.id))
@@ -113,6 +147,7 @@ async def dashboard_page(
     return HTMLResponse(render("dashboard.html", request=request,
         user=user, car=car, snaps=snaps, latest=latest, snap_count=snap_count,
         freshness=freshness, starline_connected=starline_connected,
+        battery=battery, device_settings=device_settings, obd_errors=obd_errors,
         initial_motohours=getattr(car, "initial_motohours", 0) if car else 0,
         motohours_reset_at=getattr(car, "motohours_reset_at", None) if car else None,
         service_plans=service_plans, current_km=current_km, current_mh=current_mh,

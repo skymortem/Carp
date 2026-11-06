@@ -184,6 +184,23 @@ class StarLineClient:
             raise StarLineError("StarLine вернул некорректные данные устройства")
         return device_data
 
+    async def get_obd_errors(self, device_id: str) -> list[dict]:
+        """Текущие ошибки OBD из кеша устройства.
+
+        Это снимок «что горит прямо сейчас», а не история: StarLine отдаёт
+        только актуальный список, поэтому историю накапливает Carp.
+        """
+        resp = await self.api_request("GET", f"/json/device/{device_id}/obd_errors")
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            raise StarLineError("StarLine вернул некорректный ответ по ошибкам OBD") from exc
+
+        if isinstance(data, dict) and data.get("code") not in (None, 200):
+            raise StarLineError("StarLine не вернул ошибки OBD")
+        items = data.get("obd_errors") if isinstance(data, dict) else None
+        return [item for item in (items or []) if isinstance(item, dict)]
+
     # ── Получение списка устройств пользователя ────────────────────
 
     async def get_user_devices(self) -> list[dict]:
@@ -265,7 +282,58 @@ class StarLineClient:
             "is_armed": flag(state.get("arm")),
             "ctemperature": common.get("ctemp"),
             "etemperature": common.get("etemp"),
+            "battery_type": common.get("battery_type"),
             "motohours_minutes": counter(state.get("motohrs")),
+        }
+
+    @staticmethod
+    def parse_r_start(device_data: dict) -> dict:
+        """Настройки автозапуска из data.r_start.
+
+        Каждое условие приходит как {"has": bool, "value": int}: has — условие
+        включено, value — порог (температура °C, период в часах, порог по АКБ,
+        Unix-время для расписания). Флаг state.r_start — включён ли автозапуск.
+        """
+        r_start = device_data.get("r_start")
+        r_start = r_start if isinstance(r_start, dict) else {}
+        state = device_data.get("state")
+        state = state if isinstance(state, dict) else {}
+
+        def condition(name: str) -> tuple[bool | None, int | None]:
+            raw = r_start.get(name)
+            if not isinstance(raw, dict):
+                return None, None
+            raw_value = raw.get("value")
+            value: int | None = None
+            if raw_value is not None and not isinstance(raw_value, bool):
+                try:
+                    value = int(raw_value)
+                except (TypeError, ValueError):
+                    value = None
+            return bool(raw.get("has")), value
+
+        def flag(raw) -> bool | None:
+            if raw in (True, 1, '1'):
+                return True
+            if raw in (False, 0, '0'):
+                return False
+            return None
+
+        temp_on, temp = condition("temp")
+        period_on, period = condition("period")
+        battery_on, battery = condition("battery")
+        cron_on, cron = condition("cron")
+
+        return {
+            "r_start_active": flag(state.get("r_start")),
+            "r_start_temp_on": temp_on,
+            "r_start_temp": temp,
+            "r_start_period_on": period_on,
+            "r_start_period_h": period,
+            "r_start_battery_on": battery_on,
+            "r_start_battery": battery,
+            "r_start_cron_on": cron_on,
+            "r_start_cron": cron,
         }
 
 @lru_cache(maxsize=1)

@@ -59,6 +59,10 @@ class StarSnap(Base):
     # Состояние
     gsm_lvl = Column(Integer, nullable=True)
     battery_v = Column(Float, nullable=True)             # common.battery
+    battery_type = Column(String, nullable=True)         # common.battery_type: volt | percent
+    # Уличная температура: в API StarLine её нет, берём по координатам
+    # (Open-Meteo) в момент сбора. None, если сети не было — это не ошибка.
+    outside_temp = Column(Float, nullable=True)
     engine_on = Column(Boolean, nullable=True)           # state.ign
     is_armed = Column(Boolean, nullable=True)            # state.arm
     ctemperature = Column(Float, nullable=True)          # common.ctemp
@@ -105,3 +109,53 @@ class ServiceLog(Base):
     mileage_km = Column(Integer, nullable=True)  # пробег при ТО
     motohours = Column(Integer, nullable=True)   # моточасы при ТО
     done_at = Column(DateTime(timezone=True), server_default=func.now())  # дата выполнения
+
+
+class ObdError(Base):
+    """Код ошибки OBD, когда-либо увиденный у машины.
+
+    StarLine отдаёт только текущий список из кеша, поэтому «ошибка есть»
+    мы определяем по наличию кода в последнем ответе: пропавшие коды
+    помечаются закрытыми, а не удаляются — история остаётся.
+    """
+    __tablename__ = "obd_errors"
+
+    __table_args__ = (
+        Index("ix_obd_errors_car_active", "car_id", "is_active"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    car_id = Column(Integer, ForeignKey("cars.id"), nullable=False, index=True)
+    code = Column(String, nullable=False)                 # obd_errors[].error, напр. "P0171"
+    description = Column(String, nullable=True)           # obd_errors[].descriptions
+    warning_level = Column(Integer, nullable=True)        # obd_errors[].warning_level
+    first_seen = Column(DateTime(timezone=True), nullable=False)
+    last_seen = Column(DateTime(timezone=True), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class DeviceSettings(Base):
+    """Последние известные настройки устройства (только чтение).
+
+    Сейчас используется блок автозапуска (data.r_start) и отметка о том,
+    что настройки вообще удалось прочитать: fetched_at.
+    """
+    __tablename__ = "device_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    car_id = Column(Integer, ForeignKey("cars.id"), nullable=False, index=True, unique=True)
+    fetched_at = Column(DateTime(timezone=True), nullable=False)
+
+    # data.r_start.<условие> = {has: bool, value: int}
+    r_start_active = Column(Boolean, nullable=True)       # state.r_start — включён ли сейчас
+    r_start_temp = Column(Integer, nullable=True)         # °C, например -3
+    r_start_temp_on = Column(Boolean, nullable=True)
+    r_start_period_h = Column(Integer, nullable=True)     # часы между запусками
+    r_start_period_on = Column(Boolean, nullable=True)
+    r_start_battery = Column(Integer, nullable=True)      # порог по АКБ, как его отдаёт API
+    r_start_battery_on = Column(Boolean, nullable=True)
+    r_start_cron = Column(Integer, nullable=True)         # Unix-время ближайшего запуска по расписанию
+    r_start_cron_on = Column(Boolean, nullable=True)
+
+    car = relationship("Car", backref="device_settings")

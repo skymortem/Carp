@@ -56,6 +56,98 @@
         </div>
     </div>
 
+    <!-- Диагностика: температуры, АКБ, ошибки OBD, автозапуск -->
+    {% if car %}
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+        <div class="card p-4">
+            <div class="text-sm text-slate-400 mb-2">Температуры</div>
+            <div class="space-y-1 text-sm">
+                <div class="flex items-baseline justify-between gap-2">
+                    <span class="text-slate-500">Салон</span>
+                    <span class="text-lg font-semibold" x-text="fmtTemp(latest?.ctemperature)"></span>
+                </div>
+                <div class="flex items-baseline justify-between gap-2">
+                    <span class="text-slate-500">Улица</span>
+                    <span class="text-lg font-semibold text-slate-300" x-text="fmtTemp(latest?.outside_temp)"></span>
+                </div>
+                <div class="flex items-baseline justify-between gap-2">
+                    <span class="text-slate-500">Двигатель</span>
+                    <span class="text-lg font-semibold" x-text="fmtTemp(latest?.etemperature)"></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="card p-4">
+            <div class="text-sm text-slate-400">АКБ</div>
+            {% if battery %}
+            <div class="text-2xl font-bold {% if battery.low %}text-amber-400{% else %}text-green-400{% endif %}">
+                {{ battery.value }}<span class="text-base font-medium text-slate-400 ml-1.5">{{ battery.unit }}</span>
+            </div>
+            <div class="text-xs mt-1 {% if battery.low %}text-amber-400{% else %}text-slate-500{% endif %}">
+                {% if battery.low %}низкое напряжение{% else %}в норме{% endif %}
+            </div>
+            {% else %}
+            <div class="text-2xl font-bold text-slate-500">—</div>
+            <div class="text-xs text-slate-500 mt-1">нет данных</div>
+            {% endif %}
+        </div>
+
+        <div class="card p-4">
+            <div class="text-sm text-slate-400">Ошибки OBD</div>
+            {% if obd_errors %}
+                <div class="text-2xl font-bold text-red-400">{{ obd_errors|length }}</div>
+                <div class="mt-1 space-y-0.5 text-xs">
+                    {% for e in obd_errors[:3] %}
+                    <div class="text-slate-300 truncate" title="{{ e.description or e.code }}">
+                        <span class="font-mono text-red-400">{{ e.code }}</span>{% if e.description %} · {{ e.description[:48] }}{% endif %}
+                    </div>
+                    {% endfor %}
+                    {% if obd_errors|length > 3 %}
+                    <div class="text-slate-500">и ещё {{ obd_errors|length - 3 }}</div>
+                    {% endif %}
+                </div>
+            {% elif device_settings %}
+                <div class="text-lg font-semibold text-green-400">Ошибок нет</div>
+                <div class="text-xs text-slate-500 mt-1">при последнем сборе</div>
+            {% else %}
+                <div class="text-lg font-semibold text-slate-500">—</div>
+                <div class="text-xs text-slate-500 mt-1">нажми «Собрать сейчас»</div>
+            {% endif %}
+        </div>
+
+        <div class="card p-4">
+            <div class="text-sm text-slate-400">Автозапуск</div>
+            {% if device_settings %}
+                {% if device_settings.r_start_active %}
+                <div class="text-lg font-semibold text-green-400">Включён</div>
+                {% else %}
+                <div class="text-lg font-semibold text-slate-400">Выключен</div>
+                {% endif %}
+                {% set conditions = [] %}
+                {% if device_settings.r_start_temp_on and device_settings.r_start_temp is not none %}
+                    {% set _ = conditions.append('по температуре ' ~ device_settings.r_start_temp ~ ' °C') %}
+                {% endif %}
+                {% if device_settings.r_start_period_on and device_settings.r_start_period_h %}
+                    {% set _ = conditions.append('каждые ' ~ device_settings.r_start_period_h ~ ' ч') %}
+                {% endif %}
+                {% if device_settings.r_start_battery_on %}
+                    {% set _ = conditions.append('по напряжению АКБ') %}
+                {% endif %}
+                {% if device_settings.r_start_cron_on %}
+                    {% set _ = conditions.append('по расписанию') %}
+                {% endif %}
+                <div class="mt-1 space-y-0.5 text-xs text-slate-400">
+                    {% for c in conditions %}<div>{{ c }}</div>{% endfor %}
+                    {% if not conditions %}<div class="text-slate-500">условия не заданы</div>{% endif %}
+                </div>
+            {% else %}
+                <div class="text-lg font-semibold text-slate-500">—</div>
+                <div class="text-xs text-slate-500 mt-1">настройки ещё не прочитаны</div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Сообщение если не подключён StarLine -->
     {% if not starline_connected %}
     <div class="card p-8 text-center">
@@ -150,6 +242,12 @@
                 const min = m % 60;
                 return h + 'ч ' + min + 'м';
             },
+            fmtTemp(value) {
+                if (value === null || value === undefined) return '—';
+                const n = Number(value);
+                if (!Number.isFinite(n)) return '—';
+                return Math.round(n) + '°';
+            },
             init() {
                 // Возраст данных тикает сам — иначе «5 мин назад» врёт через час.
                 if (!freshnessState.lastTs) return;
@@ -231,6 +329,8 @@
                     borderColor: '#4f8cff',
                     borderWidth: 1,
                     borderRadius: 4,
+                    // Один месяц не должен растягиваться на пол-экрана.
+                    maxBarThickness: 56,
                 }]
             },
             options: {

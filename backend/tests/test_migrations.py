@@ -8,7 +8,7 @@ import app.models.user  # noqa: F401
 from app.database import Base
 from app.migrations import BASELINE_REVISION, run_migrations
 
-HEAD = "0002_snap_car_ts_index"
+HEAD = "0003_diagnostics"
 
 
 def _async_url(tmp_path, name="fresh.db"):

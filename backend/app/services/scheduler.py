@@ -12,7 +12,7 @@ from app.config import settings
 from app.database import async_session
 from app.models.car import Car
 from app.services.starline import configured_client, StarLineError
-from app.services.collection import collect_snapshot, save_snapshot
+from app.services.collection import collect_and_store
 
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
@@ -43,13 +43,13 @@ async def collect_all_cars():
 
     for car in cars:
         try:
-            snapshot = await collect_snapshot(client, car.starline_device_id)
             async with async_session() as db:
-                await save_snapshot(db, car.id, snapshot)
+                snapshot, extra = await collect_and_store(client, db, car)
             logger.info(
-                "Collected car=%s: mileage=%s fuel=%s motohrs=%s",
+                "Collected car=%s: mileage=%s fuel=%s motohrs=%s errors=%s",
                 car.id, snapshot["mileage_km"],
                 snapshot["fuel_litres"], snapshot["motohours_minutes"],
+                len(extra.get("errors") or []),
             )
         except StarLineError as e:
             logger.error("Collect failed for car=%s: %s", car.id, e)
