@@ -35,7 +35,7 @@
     {% endif %}
 
     <!-- Индикаторы -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-8">
         <div class="card p-4">
             <div class="text-sm text-slate-400">Пробег · последнее известное показание</div>
             <div class="text-2xl font-bold" x-text="currentKm !== null ? currentKm.toLocaleString() + ' км' : '—'"></div>
@@ -58,7 +58,7 @@
 
     <!-- Диагностика: температуры, АКБ, ошибки OBD, автозапуск -->
     {% if car %}
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-8">
         <div class="card p-4">
             <div class="text-sm text-slate-400 mb-2">Температуры</div>
             <div class="space-y-1 text-sm">
