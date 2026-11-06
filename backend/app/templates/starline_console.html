@@ -54,6 +54,12 @@
             <button @click="quick('GET', '/json/v1/device/{device_id}/position')" class="btn-secondary text-xs">Position</button>
             <button @click="quick('POST', '/json/v1/device/{device_id}/getObdData')" class="btn-secondary text-xs">OBD history</button>
             <button @click="quick('GET', '/json/device/{device_id}/obd_params')" class="btn-secondary text-xs">OBD params</button>
+            <button @click="quick('GET', '/json/device/{device_id}/obd_errors')" class="btn-secondary text-xs">OBD errors</button>
+            <button @click="quick('POST', '/json/v2/device/{device_id}/details')" class="btn-secondary text-xs">Details</button>
+            <button @click="quickDay('/json/v2/device/{device_id}/driving_score')" class="btn-secondary text-xs">Driving score</button>
+            <button @click="quickWays()" class="btn-secondary text-xs">Ways (24h)</button>
+            <button @click="quick('GET', '/json/v4/device/{device_id}/settings')" class="btn-secondary text-xs">Settings</button>
+            <button @click="quick('GET', '/json/v3/library/events')" class="btn-secondary text-xs">Event library</button>
             <button @click="quick('GET', '/json/v2/device/{device_id}')" class="btn-secondary text-xs">Device summary</button>
         </div>
     </div>
@@ -104,6 +110,21 @@ function apiConsole() {
             this.method = 'POST';
             this.endpoint = '/json/v2/device/{device_id}/events';
             this.body = JSON.stringify({period_start: yesterday, period_end: now}, null, 2);
+            this.send();
+        },
+        quickDay(endpoint) {
+            // driving_score принимает конкретный день в Unix-времени.
+            this.method = 'POST';
+            this.endpoint = endpoint;
+            this.body = JSON.stringify({day: Math.floor(Date.now() / 1000)}, null, 2);
+            this.send();
+        },
+        quickWays() {
+            // Ограничение StarLine для физлиц: окно не больше 24 часов.
+            const now = Math.floor(Date.now() / 1000);
+            this.method = 'POST';
+            this.endpoint = '/json/v1/device/{device_id}/ways';
+            this.body = JSON.stringify({begin: now - 86400, end: now, split_way: true}, null, 2);
             this.send();
         }
     };
