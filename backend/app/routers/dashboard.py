@@ -53,11 +53,21 @@ def render(name: str, request: Request, **context) -> str:
 
 
 @router.get("/", response_class=HTMLResponse)
-async def index_page(request: Request, user: Optional[User] = Depends(maybe_user)):
-    """Главная страница — если залогинен, показываем дашборд."""
+async def index_page(
+    request: Request,
+    user: Optional[User] = Depends(maybe_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Публичная главная: описание проекта и вход.
+
+    Раньше для незалогиненного здесь был только экран входа — для
+    репутационных списков (и для человека) это неотличимо от фишинговой
+    страницы, поэтому у установки есть нормальное «лицо».
+    """
     if user:
         return RedirectResponse(url="/dashboard", status_code=302)
-    return HTMLResponse(render("index.html", request=request))
+    owner_exists = await db.scalar(select(User.id).limit(1)) is not None
+    return HTMLResponse(render("index.html", request=request, owner_exists=owner_exists))
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
@@ -214,13 +224,18 @@ async def series(
 
 
 @router.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
-    return HTMLResponse(render("auth/login.html", request=request))
+async def login_page(request: Request, db: AsyncSession = Depends(get_db)):
+    owner_exists = await db.scalar(select(User.id).limit(1)) is not None
+    return HTMLResponse(render("auth/login.html", request=request, owner_exists=owner_exists))
 
 
 @router.get("/register", response_class=HTMLResponse)
-async def register_page(request: Request):
-    return HTMLResponse(render("auth/register.html", request=request))
+async def register_page(request: Request, db: AsyncSession = Depends(get_db)):
+    # Регистрация закрыта после создания владельца: показывать форму,
+    # которая гарантированно вернёт 403, — плохой сценарий.
+    if await db.scalar(select(User.id).limit(1)) is not None:
+        return RedirectResponse(url="/login", status_code=302)
+    return HTMLResponse(render("auth/register.html", request=request, owner_exists=False))
 
 
 @router.get("/setup", response_class=HTMLResponse)

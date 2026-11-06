@@ -18,8 +18,13 @@
         <button type="submit" class="btn-primary w-full">Войти</button>
         <div class="mt-3 text-sm text-red-400" x-text="result"></div>
     </form>
+    {% if not owner_exists %}
     <p class="mt-4 text-sm text-slate-500">
         Нет аккаунта? <a href="/register" class="text-blue-400">Зарегистрироваться</a>
+    </p>
+    {% endif %}
+    <p class="mt-4 text-xs text-slate-500">
+        <a href="/" class="hover:text-slate-300">← На главную</a>
     </p>
 </div>
 {% endblock %}

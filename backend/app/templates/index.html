@@ -1,32 +1,73 @@
 {% extends "base.html" %}
-{% block title %}Carp — учёт расходов на авто{% endblock %}
+{% block title %}Carp — self-hosted учёт автомобиля со StarLine{% endblock %}
 {% block content %}
-<div class="flex flex-col items-center justify-center min-h-[70vh] text-center">
-    <h1 class="text-5xl font-bold mb-4">🚗 Carp</h1>
-    <p class="text-xl text-slate-400 mb-8 max-w-lg">
-        Учётная система для автомобиля
-        через <span class="text-blue-400">StarLine</span>.
+
+<div class="max-w-3xl">
+    <p class="text-xs uppercase tracking-widest text-slate-500 mb-4">Self-hosted · Apache 2.0</p>
+
+    <h1 class="text-3xl md:text-4xl font-bold leading-tight mb-4">
+        Учёт автомобиля<br class="hidden md:block"> по данным со StarLine
+    </h1>
+
+    <p class="text-slate-400 text-base md:text-lg leading-relaxed mb-6 max-w-2xl">
+        Carp сам забирает телеметрию с CAN-шины через открытое API StarLine: пробег, топливо,
+        моточасы, температуры, напряжение АКБ и коды ошибок OBD. Считает интервалы ТО,
+        строит графики и показывает, насколько свежие данные.
     </p>
-    <div class="flex gap-4">
-        <a href="/register" class="btn-primary text-lg px-8 py-3">Начать</a>
-        <a href="/login" class="btn-secondary text-lg px-8 py-3">Войти</a>
+
+    <div class="flex flex-wrap items-center gap-3 mb-3">
+        {% if owner_exists %}
+            <a href="/login" class="btn-primary">Войти</a>
+        {% else %}
+            <a href="/register" class="btn-primary">Создать аккаунт</a>
+            <a href="/login" class="btn-secondary">Войти</a>
+        {% endif %}
+        <a href="https://github.com/skymortem/Carp" class="btn-secondary"
+           rel="noopener noreferrer" target="_blank">Исходный код</a>
     </div>
-    <div class="mt-16 grid grid-cols-1 md:grid-cols-3 gap-6 max-w-3xl">
-        <div class="card p-6">
-            <div class="text-3xl mb-2">📡</div>
-            <h3 class="font-bold mb-1">StarLine интеграция</h3>
-            <p class="text-sm text-slate-400">Пробег и уровень топлива — каждый час, без ручного ввода</p>
+    {% if owner_exists %}
+    <p class="text-xs text-slate-500 mb-10">Установкой уже владеет один человек — регистрация закрыта.</p>
+    {% else %}
+    <p class="text-xs text-slate-500 mb-10">Первый зарегистрировавшийся становится владельцем, после этого регистрация закрывается.</p>
+    {% endif %}
+
+    <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-5 text-sm mb-12">
+        <div>
+            <dt class="font-semibold mb-1">Показания без ручного ввода</dt>
+            <dd class="text-slate-400">Пробег, уровень топлива и моточасы приходят с CAN-шины раз в час, повторные снимки не дублируются.</dd>
         </div>
-        <div class="card p-6">
-            <div class="text-3xl mb-2">📊</div>
-            <h3 class="font-bold mb-1">Графики и отчёты</h3>
-            <p class="text-sm text-slate-400">Динамика пробега, расхода топлива, общие затраты</p>
+        <div>
+            <dt class="font-semibold mb-1">Обслуживание по трём интервалам</dt>
+            <dd class="text-slate-400">Операции ТО считаются и по километрам, и по месяцам, и по моточасам — смета ближайшего обслуживания видна сразу.</dd>
         </div>
-        <div class="card p-6">
-            <div class="text-3xl mb-2">🔔</div>
-            <h3 class="font-bold mb-1">Умные напоминания</h3>
-            <p class="text-sm text-slate-400">Когда пора на ТО, страховку или диагностику</p>
+        <div>
+            <dt class="font-semibold mb-1">Диагностика, а не только цифры</dt>
+            <dd class="text-slate-400">Ошибки OBD с расшифровкой, напряжение АКБ, температуры салона и двигателя, настройки автозапуска.</dd>
         </div>
-    </div>
+        <div>
+            <dt class="font-semibold mb-1">Видно, когда данные устарели</dt>
+            <dd class="text-slate-400">Возраст последнего снимка сравнивается с интервалом сбора: молчаливо «залипший» сбор не выглядит как рабочий.</dd>
+        </div>
+    </dl>
+
+    <h2 class="text-sm uppercase tracking-widest text-slate-500 mb-4">Как это работает</h2>
+    <ol class="space-y-3 text-sm text-slate-300 mb-12">
+        <li><span class="text-slate-500 font-mono mr-2">01</span> В личном кабинете StarLine создаётся приложение и выдаются appId/secret.</li>
+        <li><span class="text-slate-500 font-mono mr-2">02</span> Carp авторизуется, находит вашу сигнализацию и раз в час сохраняет снимок показаний.</li>
+        <li><span class="text-slate-500 font-mono mr-2">03</span> Дашборд открывается в браузере и ставится на экран «Домой» как приложение.</li>
+    </ol>
+
+    <h2 class="text-sm uppercase tracking-widest text-slate-500 mb-4">Что важно знать</h2>
+    <ul class="space-y-2 text-sm text-slate-400 mb-12">
+        <li>— Одна установка обслуживает одного владельца: регистрация закрывается после создания аккаунта.</li>
+        <li>— Данные хранятся на вашем сервере в SQLite. Наружу уходят только запросы к StarLine и температура воздуха с Open-Meteo.</li>
+        <li>— Это личный проект, а не сервис: аккаунты не продаются, рекламы и трекеров на странице нет.</li>
+    </ul>
 </div>
+
+<footer class="border-t border-slate-700/50 pt-6 text-xs text-slate-500 flex flex-wrap gap-x-6 gap-y-2">
+    <span>Carp · учёт автомобиля</span>
+    <a href="https://github.com/skymortem/Carp" class="hover:text-slate-300" rel="noopener noreferrer" target="_blank">github.com/skymortem/Carp</a>
+    <span>Apache License 2.0</span>
+</footer>
 {% endblock %}
