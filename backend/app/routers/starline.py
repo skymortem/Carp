@@ -14,7 +14,7 @@ from app.services.starline import StarLineClient, StarLineError
 from app.config import persist_settings, settings
 
 from app.services.starline import configured_client, cached_client
-from app.services.collection import collect_snapshot, save_snapshot
+from app.services.collection import collect_and_store, save_snapshot
 from app.services.freshness import describe_freshness, last_snapshot_ts
 
 logger = logging.getLogger(__name__)
@@ -213,10 +213,11 @@ async def fetch_data(
 
     try:
         client = configured_client()
-        snapshot = await collect_snapshot(client, car.starline_device_id)
-        snap = await save_snapshot(db, car.id, snapshot)
+        snapshot, extra = await collect_and_store(client, db, car)
 
-        return {"ok": True, "snap_id": snap.id, "data": {
+        return {"ok": True, "snap_id": extra["snap"].id,
+                "errors": len(extra.get("errors") or []),
+                "data": {
             "ts": snapshot["ts"].isoformat(),
             "mileage_km": snapshot["mileage_km"],
             "fuel_litres": snapshot["fuel_litres"],
@@ -224,6 +225,10 @@ async def fetch_data(
             "speed_kmh": snapshot["speed_kmh"],
             "engine_on": snapshot["engine_on"],
             "is_moving": snapshot["is_moving"],
+            "battery_v": snapshot["battery_v"],
+            "ctemperature": snapshot["ctemperature"],
+            "etemperature": snapshot["etemperature"],
+            "outside_temp": snapshot["outside_temp"],
         }}
 
     except StarLineError as e:
