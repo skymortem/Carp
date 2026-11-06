@@ -227,8 +227,8 @@
                 datasets: [{
                     label: 'Пробег (км)',
                     data: data,
-                    backgroundColor: 'rgba(59,130,246,0.7)',
-                    borderColor: '#3b82f6',
+                    backgroundColor: 'rgba(79,140,255,0.75)',
+                    borderColor: '#4f8cff',
                     borderWidth: 1,
                     borderRadius: 4,
                 }]
@@ -236,11 +236,17 @@
             options: {
                 responsive: true,
                 plugins: {
-                    legend: { labels: { color: '#94a3b8' } },
+                    legend: { labels: { color: '#8b94a3' } },
                 },
                 scales: {
-                    x: { ticks: { color: '#64748b' } },
-                    y: { ticks: { color: '#64748b', beginAtZero: true } }
+                    x: {
+                        ticks: { color: '#6f7a88' },
+                        grid: { color: 'rgba(255,255,255,0.04)' },
+                    },
+                    y: {
+                        ticks: { color: '#6f7a88', beginAtZero: true },
+                        grid: { color: 'rgba(255,255,255,0.06)' },
+                    }
                 }
             }
         });
