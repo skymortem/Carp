@@ -2,8 +2,8 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.migrations import run_migrations
@@ -59,6 +59,41 @@ async def service_worker():
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     return FileResponse(static_dir / "icons" / "favicon-32.png", media_type="image/png")
+
+
+@app.get("/robots.txt", include_in_schema=False)
+async def robots(request: Request):
+    base = str(request.base_url).rstrip("/")
+    body = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        # Внутренние экраны и API поисковикам не нужны, а форма входа
+        # в индексе — ровно то, из-за чего домен выглядит фишингом.
+        "Disallow: /dashboard\n"
+        "Disallow: /login\n"
+        "Disallow: /register\n"
+        "Disallow: /setup\n"
+        "Disallow: /starline-console\n"
+        "Disallow: /service-plan\n"
+        "Disallow: /auth/\n"
+        "Disallow: /starline/\n"
+        "Disallow: /api/\n"
+        "\n"
+        f"Sitemap: {base}/sitemap.xml\n"
+    )
+    return PlainTextResponse(body, media_type="text/plain; charset=utf-8")
+
+
+@app.get("/sitemap.xml", include_in_schema=False)
+async def sitemap(request: Request):
+    base = str(request.base_url).rstrip("/")
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"  <url><loc>{base}/</loc><changefreq>monthly</changefreq><priority>1.0</priority></url>\n"
+        "</urlset>\n"
+    )
+    return Response(content=body, media_type="application/xml")
 
 # Роутеры
 app.include_router(auth.router)

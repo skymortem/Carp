@@ -96,7 +96,9 @@
                 <button hx-post="/auth/logout" hx-target="body" hx-push-url="/" class="text-red-400 hover:text-red-300">Выйти</button>
             {% else %}
                 <a href="/login" class="text-slate-300 hover:text-white">Войти</a>
+                {% if not owner_exists %}
                 <a href="/register" class="btn-primary text-sm">Регистрация</a>
+                {% endif %}
             {% endif %}
         </div>
     </nav>
