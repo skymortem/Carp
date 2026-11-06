@@ -9,26 +9,56 @@
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <script>
+        // Палитра «Графит»: нейтрали переопределены на холодный графит,
+        // акцент — один синий. Классы в шаблонах остаются прежними,
+        // поэтому разметку при смене палитры трогать не нужно.
         tailwind.config = {
             darkMode: 'class',
             theme: {
                 extend: {
                     colors: {
-                        dark: { 50: '#f8fafc', 100: '#1e293b', 200: '#334155', 300: '#475569', 400: '#64748b', 500: '#94a3b8', 600: '#cbd5e1', 700: '#e2e8f0', 800: '#f1f5f9', 900: '#f8fafc' }
+                        slate: {
+                            100: '#e7eaf0', 200: '#c8cfd9', 300: '#b6bfcc', 400: '#8b94a3',
+                            500: '#6f7a88', 600: '#566170', 700: '#333c48',
+                            800: '#232a34', 900: '#161b22',
+                        },
+                        blue: { 300: '#a9c6ff', 400: '#8db4ff', 500: '#4f8cff', 600: '#3c78e8', 700: '#2f62c9' },
+                        red: { 300: '#ff9d95', 400: '#ff7b72', 500: '#e5534b', 700: '#8c3a3a', 900: '#3a1c1c' },
+                        green: { 400: '#6fd39a', 500: '#2f9e5e' },
+                        amber: { 400: '#e8b34b' },
                     }
                 }
             }
         }
     </script>
     <style>
-        body { background: #0f172a; color: #e2e8f0; }
-        .card { background: #1e293b; border: 1px solid #334155; border-radius: 0.75rem; }
-        .btn-primary { background: #3b82f6; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; font-weight: 600; }
-        .btn-primary:hover { background: #2563eb; }
-        .btn-secondary { background: #334155; color: #e2e8f0; padding: 0.5rem 1rem; border-radius: 0.5rem; }
-        .btn-secondary:hover { background: #475569; }
-        .input { background: #0f172a; border: 1px solid #334155; border-radius: 0.5rem; padding: 0.5rem 0.75rem; color: #e2e8f0; width: 100%; }
-        .input:focus { outline: none; border-color: #3b82f6; }
+        :root {
+            --bg: #0e1116;
+            --surface: #151a21;
+            --raised: #1b212a;
+            --line: #232a34;
+            --ink: #e7eaf0;
+            --muted: #8b94a3;
+            --accent: #4f8cff;
+            --accent-hover: #3c78e8;
+        }
+        body { background: var(--bg); color: var(--ink); }
+        .card { background: var(--surface); border: 1px solid var(--line); border-radius: 0.625rem; }
+        .btn-primary {
+            background: var(--accent); color: #fff; padding: 0.5rem 1rem;
+            border-radius: 0.5rem; font-weight: 600; transition: background-color .15s ease;
+        }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-secondary { background: var(--raised); color: var(--ink); padding: 0.5rem 1rem; border-radius: 0.5rem; }
+        .btn-secondary:hover { background: #222a35; }
+        .btn-primary:focus-visible, .btn-secondary:focus-visible, .input:focus-visible {
+            outline: 2px solid var(--accent); outline-offset: 2px;
+        }
+        .input {
+            background: var(--bg); border: 1px solid var(--line); border-radius: 0.5rem;
+            padding: 0.5rem 0.75rem; color: var(--ink); width: 100%;
+        }
+        .input:focus { outline: none; border-color: var(--accent); }
         .badge { padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }
     </style>
 </head>
