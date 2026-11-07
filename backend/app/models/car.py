@@ -148,7 +148,9 @@ class DeviceSettings(Base):
     fetched_at = Column(DateTime(timezone=True), nullable=False)
 
     # data.r_start.<условие> = {has: bool, value: int}
-    r_start_active = Column(Boolean, nullable=True)       # state.r_start — включён ли сейчас
+    # state.r_start: «двигатель СЕЙЧАС запущен автозапуском», а не «автозапуск включён»;
+    # включённость задают флаги r_start_*_on (data.r_start.<условие>.has).
+    r_start_active = Column(Boolean, nullable=True)
     r_start_temp = Column(Integer, nullable=True)         # °C, например -3
     r_start_temp_on = Column(Boolean, nullable=True)
     r_start_period_h = Column(Integer, nullable=True)     # часы между запусками

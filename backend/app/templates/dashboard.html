@@ -185,10 +185,17 @@
         <div class="card p-4">
             <div class="text-sm text-slate-400">Автозапуск</div>
             {% if device_settings %}
-                {% if device_settings.r_start_active %}
+                {# Включённость задают флаги условий (`has`), а state.r_start значит
+                   «двигатель прямо сейчас запущен автозапуском» — не путать. #}
+                {% set enabled = device_settings.r_start_temp_on or device_settings.r_start_period_on
+                                 or device_settings.r_start_battery_on or device_settings.r_start_cron_on %}
+                {% if enabled %}
                 <div class="text-lg font-semibold text-green-400">Включён</div>
                 {% else %}
                 <div class="text-lg font-semibold text-slate-400">Выключен</div>
+                {% endif %}
+                {% if device_settings.r_start_active %}
+                <div class="text-xs text-green-400 mt-0.5">🟢 двигатель запущен автозапуском</div>
                 {% endif %}
                 {% set conditions = [] %}
                 {% if device_settings.r_start_temp_on and device_settings.r_start_temp is not none %}
@@ -198,7 +205,9 @@
                     {% set _ = conditions.append('каждые ' ~ device_settings.r_start_period_h ~ ' ч') %}
                 {% endif %}
                 {% if device_settings.r_start_battery_on %}
-                    {% set _ = conditions.append('по напряжению АКБ') %}
+                    {# API отдаёт порог в сотых вольта: 1180 → 11.8 В #}
+                    {% set volts = (device_settings.r_start_battery / 100) if device_settings.r_start_battery and device_settings.r_start_battery > 100 else device_settings.r_start_battery %}
+                    {% set _ = conditions.append('по напряжению АКБ' ~ (' ' ~ volts|round(1) ~ ' В' if volts is not none else '')) %}
                 {% endif %}
                 {% if device_settings.r_start_cron_on %}
                     {% set _ = conditions.append('по расписанию') %}
