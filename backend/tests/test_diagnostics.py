@@ -144,7 +144,7 @@ async def test_dashboard_shows_diagnostics_cards(owner):
         await db.commit()
 
     html = (await owner.get("/dashboard")).text
-    assert "Температуры" in html and "Двигатель" in html
+    assert "Температура" in html and "Двигатель" in html
     assert "12.4" in html and "в норме" in html
     assert "P0171" in html
     assert "Включён" in html and "по температуре -3 °C" in html and "каждые 8 ч" in html

@@ -12,7 +12,6 @@
             <div class="flex items-center gap-2 text-sm" title="Интервал фонового сбора: {{ collect_interval_minutes }} мин">
                 <span class="inline-block w-2.5 h-2.5 rounded-full {{ {'ok': 'bg-green-500', 'late': 'bg-amber-400', 'stale': 'bg-red-500', 'never': 'bg-slate-500'}[freshness.state] }}"></span>
                 <span class="text-slate-300" x-text="freshnessText">{{ freshness.age_text }}</span>
-                <span class="text-slate-500 hidden sm:inline">· сбор раз в {{ collect_interval_minutes }} мин</span>
             </div>
             {% endif %}
             {% if starline_connected %}
@@ -51,7 +50,7 @@
     <!-- Индикаторы -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-8">
         <div class="card p-4">
-            <div class="text-sm text-slate-400">Пробег · последнее известное показание</div>
+            <div class="text-sm text-slate-400">Пробег</div>
             <div class="text-2xl font-bold" x-text="currentKm !== null ? currentKm.toLocaleString() + ' км' : '—'"></div>
         </div>
         <div class="card p-4">
@@ -64,7 +63,7 @@
                  :class="latest?.engine_on ? 'text-green-400' : 'text-slate-400'"></div>
         </div>
         <div class="card p-4">
-            <div class="text-sm text-slate-400">Накопительные моточасы · последнее известное показание</div>
+            <div class="text-sm text-slate-400">Моточасы</div>
             <div class="text-2xl font-bold text-amber-400" x-text="motohoursDisplay"></div>
             <div class="text-xs text-slate-500 mt-1">
                 из журнала событий StarLine{% if engine_since %} · с {{ engine_since.strftime('%d.%m.%Y') }}{% endif %}<span x-show="latest?.engine_on"> · 🟢 двигатель работает</span>
@@ -128,7 +127,7 @@
     {% if car %}
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-8">
         <div class="card p-4">
-            <div class="text-sm text-slate-400 mb-2">Температуры</div>
+            <div class="text-sm text-slate-400 mb-2">Температура</div>
             <div class="space-y-1 text-sm">
                 <div class="flex items-baseline justify-between gap-2">
                     <span class="text-slate-500">Салон</span>
@@ -242,9 +241,6 @@
     </div>
     {% endif %}
 
-    <div class="text-sm">
-        <a href="/reports" class="text-blue-400 hover:text-blue-300">📊 Отчёты: пробег, расходы и цена топлива по месяцам →</a>
-    </div>
 </div>
 {% endblock %}
 
