@@ -159,3 +159,67 @@ class DeviceSettings(Base):
     r_start_cron_on = Column(Boolean, nullable=True)
 
     car = relationship("Car", backref="device_settings")
+
+
+class EngineSession(Base):
+    """Интервал работы двигателя, восстановленный из событий StarLine.
+
+    У части устройств (например S96v2) `state.motohrs` приходит `null`,
+    поэтому накопительные моточасы приходится считать самим: события
+    «Двигатель запущен/остановлен» есть у всех и идут с точностью до секунды.
+    """
+
+    __tablename__ = "engine_sessions"
+
+    __table_args__ = (
+        # Ключ дедупликации: одно и то же событие запуска не должно
+        # превратиться в две сессии при повторном разборе окна.
+        Index("ix_engine_sessions_car_started", "car_id", "started_at", unique=True),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    car_id = Column(Integer, ForeignKey("cars.id"), nullable=False, index=True)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    ended_at = Column(DateTime(timezone=True), nullable=True)  # None — двигатель ещё работает
+
+
+class FuelFill(Base):
+    """Заправка: обнаруженный прирост топлива и цена литра.
+
+    Объём считает Carp (разница уровней между соседними снимками), цену
+    спрашивает у владельца Telegram-бот. Стоимость = цена × объём.
+    """
+
+    __tablename__ = "fuel_fills"
+
+    __table_args__ = (
+        Index("ix_fuel_fills_car_detected", "car_id", "detected_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    car_id = Column(Integer, ForeignKey("cars.id"), nullable=False, index=True)
+
+    detected_at = Column(DateTime(timezone=True), nullable=False)
+    prev_litres = Column(Float, nullable=True)   # уровень до заправки
+    new_litres = Column(Float, nullable=True)    # уровень после
+    volume_litres = Column(Float, nullable=False)  # new - prev
+
+    price_per_litre = Column(Float, nullable=True)
+    total_cost = Column(Float, nullable=True)    # price_per_litre * volume_litres
+
+    # awaiting_price — вопрос задан/ждёт ответа, done — цена есть, skipped — владелец отказался
+    status = Column(String, nullable=False, default="awaiting_price")
+    asked_at = Column(DateTime(timezone=True), nullable=True)
+    answered_at = Column(DateTime(timezone=True), nullable=True)
+
+    car = relationship("Car", backref="fuel_fills")
+
+
+class AppState(Base):
+    """Мелкое состояние сервисов: offset Telegram, метки синхронизации."""
+
+    __tablename__ = "app_state"
+
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())

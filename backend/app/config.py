@@ -25,6 +25,15 @@ class Settings(BaseSettings):
     # Cron: интервал сбора данных (в минутах)
     collect_interval_minutes: int = 60
 
+    # Telegram-бот: вопрос о цене литра после заправки.
+    # Токен выдаёт @BotFather, chat_id владельца бот узнаёт из первого сообщения.
+    telegram_bot_token: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
+
+    # Минимальный прирост топлива, который считается заправкой (литры).
+    # Ниже порога — шум датчика уровня, а не заправка.
+    fuel_fill_min_litres: float = 5.0
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 

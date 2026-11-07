@@ -43,7 +43,7 @@
         <div class="mt-4 text-sm" x-text="message" :class="error ? 'text-red-400' : 'text-green-400'"></div>
     </div>
 
-    <div class="card p-6" x-show="result">
+    <div class="card p-6 mb-6" x-show="result">
         <h3 class="font-bold mb-2">✅ Подключено!</h3>
         <div class="text-sm space-y-1">
             <p>Устройство: <span class="text-blue-400" x-text="result?.device_name"></span></p>
@@ -51,6 +51,37 @@
             <p>Топливо: <span class="text-green-400" x-text="result?.fuel_litres + ' л'"></span></p>
         </div>
         <a href="/dashboard" class="btn-primary mt-4 inline-block">К дашборду →</a>
+    </div>
+
+    <div class="card p-6">
+        <h3 class="font-bold mb-2">🤖 Telegram-бот</h3>
+        <p class="text-sm text-slate-400 mb-4">
+            Бот спрашивает цену литра после каждой обнаруженной заправки и сохраняет
+            цену и стоимость. Токен выдаёт
+            <a href="https://t.me/BotFather" class="text-blue-400" target="_blank">@BotFather</a>
+            (<code class="text-xs">/newbot</code>). После создания напиши своему боту любое
+            сообщение — он ответит твоим chat_id, его и вставь ниже.
+        </p>
+        <div class="mb-4">
+            <label class="block text-sm text-slate-400 mb-1">Токен бота</label>
+            <input type="password" x-model="botToken" class="input"
+                   placeholder="123456789:AA..." autocomplete="off">
+            <p class="text-xs text-slate-500 mt-1" x-show="telegram.bot_token_set">
+                Токен уже сохранён — оставь поле пустым, чтобы не менять.
+            </p>
+        </div>
+        <div class="mb-4">
+            <label class="block text-sm text-slate-400 mb-1">Chat ID владельца</label>
+            <input type="text" x-model="chatId" class="input" placeholder="Например: 123456789">
+        </div>
+        <div class="flex gap-2">
+            <button @click="saveTelegram()" :disabled="telegramLoading" class="btn-primary flex-1"
+                    x-text="telegramLoading ? 'Сохраняю...' : '💾 Сохранить'"></button>
+            <button @click="testTelegram()" :disabled="telegramLoading" class="btn-secondary flex-1"
+                    x-text="telegramLoading ? '...' : '📨 Проверить'"></button>
+        </div>
+        <div class="mt-3 text-sm" x-text="telegramMessage"
+             :class="telegramError ? 'text-red-400' : 'text-green-400'"></div>
     </div>
 </div>
 
@@ -66,6 +97,64 @@
             message: '',
             error: false,
             result: null,
+            botToken: '',
+            chatId: '',
+            telegram: {bot_token_set: false, chat_id_set: false},
+            telegramLoading: false,
+            telegramMessage: '',
+            telegramError: false,
+            init() {
+                this.loadTelegram();
+            },
+            async loadTelegram() {
+                try {
+                    const r = await fetch('/settings/telegram');
+                    if (r.ok) this.telegram = await r.json();
+                } catch (e) { /* страница настроек не критична */ }
+            },
+            async saveTelegram() {
+                this.telegramLoading = true;
+                this.telegramMessage = '';
+                this.telegramError = false;
+                try {
+                    const r = await fetch('/settings/telegram', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            bot_token: this.botToken || null,
+                            chat_id: this.chatId || null
+                        })
+                    });
+                    const d = await r.json();
+                    this.telegram = d;
+                    this.botToken = '';
+                    this.telegramMessage = d.bot_token_set
+                        ? (d.chat_id_set ? '✅ Сохранено, бот опрашивает Telegram' : '⚠️ Токен есть, но не указан chat_id')
+                        : '⚠️ Токен не задан';
+                    this.telegramError = !d.bot_token_set;
+                } catch (e) {
+                    this.telegramError = true;
+                    this.telegramMessage = '❌ Ошибка сети: ' + e;
+                } finally {
+                    this.telegramLoading = false;
+                }
+            },
+            async testTelegram() {
+                this.telegramLoading = true;
+                this.telegramMessage = '';
+                this.telegramError = false;
+                try {
+                    const r = await fetch('/settings/telegram/test', {method: 'POST'});
+                    const d = await r.json();
+                    this.telegramError = !d.ok;
+                    this.telegramMessage = d.ok ? '📨 Сообщение отправлено — проверь Telegram' : '❌ ' + (d.detail || 'не отправлено');
+                } catch (e) {
+                    this.telegramError = true;
+                    this.telegramMessage = '❌ Ошибка сети: ' + e;
+                } finally {
+                    this.telegramLoading = false;
+                }
+            },
             async connect() {
                 this.loading = true;
                 this.message = '';
