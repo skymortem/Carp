@@ -23,6 +23,20 @@
         </div>
     </div>
 
+    {% if collect_error %}
+    <div class="card p-4 mb-6 border border-amber-700/50 bg-amber-900/20">
+        <div class="text-sm">
+            <span class="font-bold text-amber-400">Последний сбор не удался.</span>
+            {% if collect_error.at %}<span class="text-slate-500">{{ collect_error.at }}</span> · {% endif %}
+            <span class="font-mono text-amber-200">{{ collect_error.text }}</span>
+            <div class="text-slate-400 mt-1">
+                Успешный сбор убирает это сообщение. Полный стек — в логах сервиса:
+                <code class="text-xs">journalctl -u carp -n 100</code>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     {% if freshness and freshness.state in ('stale', 'never') and starline_connected %}
     <div class="card p-4 mb-6 border border-red-700/50 bg-red-900/20">
         <div class="text-sm">
@@ -53,7 +67,7 @@
             <div class="text-sm text-slate-400">Накопительные моточасы · последнее известное показание</div>
             <div class="text-2xl font-bold text-amber-400" x-text="motohoursDisplay"></div>
             <div class="text-xs text-slate-500 mt-1">
-                из журнала событий StarLine<span x-show="latest?.engine_on"> · 🟢 двигатель работает</span>
+                из журнала событий StarLine{% if engine_since %} · с {{ engine_since.strftime('%d.%m.%Y') }}{% endif %}<span x-show="latest?.engine_on"> · 🟢 двигатель работает</span>
             </div>
         </div>
     </div>

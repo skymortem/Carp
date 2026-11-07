@@ -13,9 +13,19 @@ from app.database import async_session
 from app.models.car import Car
 from app.services.starline import configured_client, StarLineError
 from app.services.collection import collect_and_store
+from app.services import health
 
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
+
+
+async def _remember_error(car_id: int, message: str) -> None:
+    """Показать причину сбоя на дашборде; ошибка записи не должна ронять сбор."""
+    try:
+        async with async_session() as db:
+            await health.record_error(db, message)
+    except Exception:
+        logger.exception("Не удалось сохранить текст ошибки сбора для car=%s", car_id)
 
 
 async def collect_all_cars():
@@ -45,6 +55,7 @@ async def collect_all_cars():
         try:
             async with async_session() as db:
                 snapshot, extra = await collect_and_store(client, db, car)
+                await health.clear_error(db)
             logger.info(
                 "Collected car=%s: mileage=%s fuel=%s motohrs=%s errors=%s",
                 car.id, snapshot["mileage_km"],
@@ -53,8 +64,10 @@ async def collect_all_cars():
             )
         except StarLineError as e:
             logger.error("Collect failed for car=%s: %s", car.id, e)
+            await _remember_error(car.id, str(e))
         except Exception as e:
             logger.exception("Unexpected error for car=%s: %s", car.id, e)
+            await _remember_error(car.id, f"{type(e).__name__}: {e}")
 
     logger.info("Scheduled collect: done")
 

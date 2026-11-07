@@ -15,6 +15,7 @@ from app.config import persist_settings, settings
 
 from app.services.starline import configured_client, cached_client
 from app.services.collection import collect_and_store, save_snapshot
+from app.services import health
 from app.services.freshness import describe_freshness, last_snapshot_ts
 
 logger = logging.getLogger(__name__)
@@ -214,6 +215,7 @@ async def fetch_data(
     try:
         client = configured_client()
         snapshot, extra = await collect_and_store(client, db, car)
+        await health.clear_error(db)
 
         return {"ok": True, "snap_id": extra["snap"].id,
                 "errors": len(extra.get("errors") or []),
@@ -235,7 +237,15 @@ async def fetch_data(
         }}
 
     except StarLineError as e:
+        logger.warning("Ручной сбор не удался: %s", e)
+        await health.record_error(db, str(e))
         raise HTTPException(status_code=502, detail=f"StarLine API error: {e}")
+    except Exception as e:
+        # Непредвиденное (например, ошибка в новом коде) тоже должно попасть
+        # на дашборд, иначе владельцу остаётся только journalctl.
+        logger.exception("Ручной сбор упал неожиданно")
+        await health.record_error(db, f"{type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сбора: {type(e).__name__}: {e}")
 
 
 @router.post("/test-device")
@@ -305,6 +315,7 @@ async def status(
         "snaps_count": await db.scalar(select(func.count()).select_from(StarSnap).where(StarSnap.car_id == car.id)),
         "last_snap_ts": freshness["last_ts"].isoformat() if freshness["last_ts"] else None,
         "collect_interval_minutes": freshness["interval_minutes"],
+        "last_error": (await health.last_error(db)),
         "freshness": {
             "state": freshness["state"],
             "label": freshness["label"],

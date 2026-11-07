@@ -11,8 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.models.user import User
-from app.models.car import Car, DeviceSettings, FuelFill, ObdError, StarSnap, ServicePlan
+from app.models.car import Car, DeviceSettings, EngineSession, FuelFill, ObdError, StarSnap, ServicePlan
 from app.services.auth import get_current_user_from_cookie, maybe_user
+from app.services import health
 from app.services.freshness import car_freshness, naive_utcnow
 
 from app.services.maintenance import current_readings, plan_status
@@ -97,6 +98,8 @@ async def dashboard_page(
     obd_errors = []
     fuel_fills = []
     fuel_totals = {"count": 0, "litres": 0.0, "cost": 0.0}
+    collect_error = None
+    engine_since = None
 
     if car:
         snap_count = await db.scalar(
@@ -134,6 +137,10 @@ async def dashboard_page(
         latest = snaps[0] if snaps else None
         starline_connected = bool(car.starline_device_id)
         freshness = await car_freshness(db, car.id)
+        collect_error = await health.last_error(db)
+        engine_since = await db.scalar(
+            select(func.min(EngineSession.started_at)).where(EngineSession.car_id == car.id)
+        )
         battery = describe_battery(latest.get("battery_v"), latest.get("battery_type")) if latest else None
 
         device_settings = await db.scalar(
@@ -173,7 +180,8 @@ async def dashboard_page(
         initial_motohours=getattr(car, "initial_motohours", 0) if car else 0,
         motohours_reset_at=getattr(car, "motohours_reset_at", None) if car else None,
         service_plans=service_plans, current_km=current_km, current_mh=current_mh,
-        fuel_fills=fuel_fills, fuel_totals=fuel_totals,
+        fuel_fills=fuel_fills, fuel_totals=fuel_totals, collect_error=collect_error,
+        engine_since=engine_since,
         collect_interval_minutes=settings.collect_interval_minutes))
 
 

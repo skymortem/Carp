@@ -11,7 +11,7 @@ from typing import Optional
 
 from sqlalchemy import func, select
 
-from app.models.car import AppState, DeviceSettings, ObdError, StarSnap
+from app.models.car import DeviceSettings, ObdError, StarSnap
 from app.services import enginetime, fuel, weather
 from app.services.starline import StarLineClient, StarLineError
 
@@ -23,8 +23,6 @@ save_lock = asyncio.Lock()
 # приходит из другого источника и меняется сама по себе, моточасы —
 # расчётная величина, которая растёт от часа к часу.
 DEDUPE_IGNORED = {"outside_temp", "motohours_minutes"}
-
-ENGINE_BACKFILL_KEY = "engine_backfill_done"
 
 
 def utcnow_naive() -> datetime:
@@ -161,10 +159,12 @@ async def mark_engine_hours(db, client, car, snap, snapshot: dict) -> Optional[i
         return snapshot["motohours_minutes"]
 
     try:
-        changed = await enginetime.sync_sessions(db, client, car)
+        changed, removed = await enginetime.sync_sessions(db, client, car)
     except StarLineError as exc:
         logger.info("Журнал событий недоступен, моточасы не обновлены: %s", exc)
         return None
+    if removed:
+        logger.info("Моточасы: убрано %s сессий раньше точки отсчёта", removed)
 
     minutes = await enginetime.cumulative_minutes(db, car.id, snap.ts)
     if minutes is None:
@@ -174,11 +174,12 @@ async def mark_engine_hours(db, client, car, snap, snapshot: dict) -> Optional[i
     snapshot["motohours_minutes"] = minutes
     await db.commit()
 
-    if changed and await db.scalar(select(AppState.value).where(AppState.key == ENGINE_BACKFILL_KEY)) is None:
-        filled = await enginetime.backfill_snapshots(db, car.id)
-        db.add(AppState(key=ENGINE_BACKFILL_KEY, value=str(filled)))
-        await db.commit()
-        logger.info("Моточасы: восстановлено %s старых снимков", filled)
+    # Пересчитываем историю, когда появились новые сессии или изменилась
+    # точка отсчёта: иначе старые снимки держат прежние (завышенные) значения.
+    if changed or removed:
+        updated = await enginetime.recompute_snapshots(db, car.id)
+        if updated:
+            logger.info("Моточасы: пересчитано снимков — %s", updated)
 
     return minutes
 

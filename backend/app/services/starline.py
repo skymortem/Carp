@@ -210,24 +210,38 @@ class StarLineClient:
         по этим парам Carp считает накопительные моточасы, потому что
         `state.motohrs` у части устройств всегда null.
 
-        Окно режем на сутки: у StarLine есть ограничение на глубину запроса,
-        и один большой запрос молча возвращает усечённую историю.
+        Окно запрашиваем одним запросом: проверено, что StarLine отдаёт 30 дней
+        целиком (самое старое событие приходит ровно на границе окна). Резать на
+        сутки — это 30 запросов подряд, а на залповый поток StarLine отвечает
+        отказом, и первый сбор после установки падал. Дробим только если
+        большой запрос не прошёл.
         """
+        try:
+            return await self._events_window(device_id, int(period_start), int(period_end))
+        except StarLineError as exc:
+            if int(period_end) - int(period_start) <= 24 * 3600:
+                raise
+            logger.info("Журнал за большое окно не отдался (%s) — читаю по суткам", exc)
+
         events: list[dict] = []
         window = 24 * 3600
         start = int(period_start)
         end = int(period_end)
         while start < end:
             chunk_end = min(start + window, end)
-            resp = await self.api_request("POST", f"/json/v2/device/{device_id}/events",
-                                          json={"period_start": start, "period_end": chunk_end})
-            data = resp.json()
-            if isinstance(data, dict) and data.get("code") not in (None, 200):
-                raise StarLineError("StarLine не вернул журнал событий")
-            items = data.get("events") if isinstance(data, dict) else None
-            events.extend(item for item in (items or []) if isinstance(item, dict))
+            events.extend(await self._events_window(device_id, start, chunk_end))
             start = chunk_end
+            await asyncio.sleep(0.3)  # не долбим API очередью запросов
         return events
+
+    async def _events_window(self, device_id: str, start: int, end: int) -> list[dict]:
+        resp = await self.api_request("POST", f"/json/v2/device/{device_id}/events",
+                                      json={"period_start": start, "period_end": end})
+        data = resp.json()
+        if isinstance(data, dict) and data.get("code") not in (None, 200):
+            raise StarLineError("StarLine не вернул журнал событий")
+        items = data.get("events") if isinstance(data, dict) else None
+        return [item for item in (items or []) if isinstance(item, dict)]
 
     # ── Получение списка устройств пользователя ────────────────────
 
