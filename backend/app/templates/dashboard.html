@@ -67,7 +67,7 @@
             <div class="text-sm text-slate-400">Накопительные моточасы · последнее известное показание</div>
             <div class="text-2xl font-bold text-amber-400" x-text="motohoursDisplay"></div>
             <div class="text-xs text-slate-500 mt-1">
-                из журнала событий StarLine<span x-show="latest?.engine_on"> · 🟢 двигатель работает</span>
+                из журнала событий StarLine{% if engine_since %} · с {{ engine_since.strftime('%d.%m.%Y') }}{% endif %}<span x-show="latest?.engine_on"> · 🟢 двигатель работает</span>
             </div>
         </div>
     </div>
