@@ -201,6 +201,34 @@ class StarLineClient:
         items = data.get("obd_errors") if isinstance(data, dict) else None
         return [item for item in (items or []) if isinstance(item, dict)]
 
+    # ── События устройства (для подсчёта моточасов) ─────────────────
+
+    async def get_events(self, device_id: str, period_start: int, period_end: int) -> list[dict]:
+        """События журнала StarLine за окно [period_start, period_end] (unix, сек).
+
+        Журнал отдаёт «Двигатель запущен/остановлен» с точностью до секунды —
+        по этим парам Carp считает накопительные моточасы, потому что
+        `state.motohrs` у части устройств всегда null.
+
+        Окно режем на сутки: у StarLine есть ограничение на глубину запроса,
+        и один большой запрос молча возвращает усечённую историю.
+        """
+        events: list[dict] = []
+        window = 24 * 3600
+        start = int(period_start)
+        end = int(period_end)
+        while start < end:
+            chunk_end = min(start + window, end)
+            resp = await self.api_request("POST", f"/json/v2/device/{device_id}/events",
+                                          json={"period_start": start, "period_end": chunk_end})
+            data = resp.json()
+            if isinstance(data, dict) and data.get("code") not in (None, 200):
+                raise StarLineError("StarLine не вернул журнал событий")
+            items = data.get("events") if isinstance(data, dict) else None
+            events.extend(item for item in (items or []) if isinstance(item, dict))
+            start = chunk_end
+        return events
+
     # ── Получение списка устройств пользователя ────────────────────
 
     async def get_user_devices(self) -> list[dict]:

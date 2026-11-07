@@ -7,7 +7,8 @@ from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.migrations import run_migrations
-from app.routers import auth, starline, dashboard, service_plan
+from app.routers import auth, starline, dashboard, service_plan, settings as settings_router
+from app.services import fuel, telegram
 from app.services.scheduler import start as start_scheduler, stop as stop_scheduler
 
 logging.basicConfig(
@@ -24,9 +25,12 @@ async def lifespan(app: FastAPI):
     logger.info("Starting up — applying migrations...")
     await run_migrations()
     start_scheduler()
+    telegram.set_handler(fuel.handle_message)
+    telegram.start()
     logger.info("DB ready! Scheduler active.")
     yield
     stop_scheduler()
+    await telegram.stop()
     logger.info("Shutting down.")
 
 
@@ -100,3 +104,4 @@ app.include_router(auth.router)
 app.include_router(starline.router)
 app.include_router(dashboard.router)
 app.include_router(service_plan.router)
+app.include_router(settings_router.router)

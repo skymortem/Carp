@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.models.user import User
-from app.models.car import Car, DeviceSettings, ObdError, StarSnap, ServicePlan
+from app.models.car import Car, DeviceSettings, FuelFill, ObdError, StarSnap, ServicePlan
 from app.services.auth import get_current_user_from_cookie, maybe_user
 from app.services.freshness import car_freshness, naive_utcnow
 
@@ -95,6 +95,8 @@ async def dashboard_page(
     battery = None
     device_settings = None
     obd_errors = []
+    fuel_fills = []
+    fuel_totals = {"count": 0, "litres": 0.0, "cost": 0.0}
 
     if car:
         snap_count = await db.scalar(
@@ -147,6 +149,16 @@ async def dashboard_page(
         plan_result = await db.execute(select(ServicePlan).where(ServicePlan.car_id == car.id))
         plans = plan_result.scalars().all()
 
+        fuel_fills = (await db.execute(
+            select(FuelFill).where(FuelFill.car_id == car.id)
+            .order_by(FuelFill.detected_at.desc()).limit(5)
+        )).scalars().all()
+        total_count, total_litres, total_cost = (await db.execute(
+            select(func.count(FuelFill.id), func.sum(FuelFill.volume_litres), func.sum(FuelFill.total_cost))
+            .where(FuelFill.car_id == car.id, FuelFill.status == "done")
+        )).one()
+        fuel_totals = {"count": total_count or 0, "litres": total_litres or 0.0, "cost": total_cost or 0.0}
+
         service_plans = []
         for p in plans:
             service_plans.append({"name": p.name, **plan_status(p, current_km, current_mh)})
@@ -161,6 +173,7 @@ async def dashboard_page(
         initial_motohours=getattr(car, "initial_motohours", 0) if car else 0,
         motohours_reset_at=getattr(car, "motohours_reset_at", None) if car else None,
         service_plans=service_plans, current_km=current_km, current_mh=current_mh,
+        fuel_fills=fuel_fills, fuel_totals=fuel_totals,
         collect_interval_minutes=settings.collect_interval_minutes))
 
 

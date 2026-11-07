@@ -9,10 +9,10 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from app.models.car import DeviceSettings, ObdError, StarSnap
-from app.services import weather
+from app.models.car import AppState, DeviceSettings, ObdError, StarSnap
+from app.services import enginetime, fuel, weather
 from app.services.starline import StarLineClient, StarLineError
 
 logger = logging.getLogger(__name__)
@@ -20,8 +20,11 @@ logger = logging.getLogger(__name__)
 save_lock = asyncio.Lock()
 
 # Поля, которые не участвуют в проверке «такой снимок уже был»: погода
-# приходит из другого источника и меняется сама по себе.
-DEDUPE_IGNORED = {"outside_temp"}
+# приходит из другого источника и меняется сама по себе, моточасы —
+# расчётная величина, которая растёт от часа к часу.
+DEDUPE_IGNORED = {"outside_temp", "motohours_minutes"}
+
+ENGINE_BACKFILL_KEY = "engine_backfill_done"
 
 
 def utcnow_naive() -> datetime:
@@ -147,17 +150,63 @@ async def save_device_settings(db, car_id: int, values: dict) -> None:
     await db.commit()
 
 
+async def mark_engine_hours(db, client, car, snap, snapshot: dict) -> Optional[int]:
+    """Проставить моточасы снимку: сначала родное значение StarLine, потом расчёт.
+
+    У S96v2 `state.motohrs` всегда null, поэтому основной путь — журнал
+    событий: сессии работы двигателя накапливаются в engine_sessions, а
+    снимок получает суммарную наработку на свой момент времени.
+    """
+    if snapshot.get("motohours_minutes") is not None:
+        return snapshot["motohours_minutes"]
+
+    try:
+        changed = await enginetime.sync_sessions(db, client, car)
+    except StarLineError as exc:
+        logger.info("Журнал событий недоступен, моточасы не обновлены: %s", exc)
+        return None
+
+    minutes = await enginetime.cumulative_minutes(db, car.id, snap.ts)
+    if minutes is None:
+        return None
+
+    snap.motohours_minutes = minutes
+    snapshot["motohours_minutes"] = minutes
+    await db.commit()
+
+    if changed and await db.scalar(select(AppState.value).where(AppState.key == ENGINE_BACKFILL_KEY)) is None:
+        filled = await enginetime.backfill_snapshots(db, car.id)
+        db.add(AppState(key=ENGINE_BACKFILL_KEY, value=str(filled)))
+        await db.commit()
+        logger.info("Моточасы: восстановлено %s старых снимков", filled)
+
+    return minutes
+
+
 async def collect_and_store(client, db, car) -> tuple[dict, dict]:
-    """Полный цикл: снимок + ошибки OBD + настройки автозапуска."""
+    """Полный цикл: снимок + моточасы + ошибки OBD + настройки + заправки."""
     snapshot, extras = await collect_full(client, car.starline_device_id)
+
+    previous_ts = await db.scalar(
+        select(func.max(StarSnap.ts)).where(StarSnap.car_id == car.id)
+    )
     snap = await save_snapshot(db, car.id, snapshot)
+    is_new = previous_ts is None or snap.ts is None or snap.ts > previous_ts
+
+    await mark_engine_hours(db, client, car, snap, snapshot)
+
+    fill = None
+    if is_new:
+        fill = await fuel.detect_fill(db, car, snapshot)
+        if fill is not None and fill.asked_at is None:
+            await fuel.ask_next_price(db, fill)
 
     if extras.get("errors") is not None:
         await sync_obd_errors(db, car.id, extras["errors"])
     if extras.get("r_start"):
         await save_device_settings(db, car.id, extras["r_start"])
 
-    return snapshot, {"snap": snap, **extras}
+    return snapshot, {"snap": snap, "fuel_fill": fill, **extras}
 
 
 def _describe(raw) -> Optional[str]:

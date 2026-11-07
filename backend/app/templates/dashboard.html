@@ -52,9 +52,63 @@
         <div class="card p-4">
             <div class="text-sm text-slate-400">Накопительные моточасы · последнее известное показание</div>
             <div class="text-2xl font-bold text-amber-400" x-text="motohoursDisplay"></div>
-            <div class="text-xs text-slate-500 mt-1" x-show="latest?.engine_on">🟢 считаются</div>
+            <div class="text-xs text-slate-500 mt-1">
+                из журнала событий StarLine<span x-show="latest?.engine_on"> · 🟢 двигатель работает</span>
+            </div>
         </div>
     </div>
+
+    <!-- Заправки: объём считает Carp, цену спрашивает Telegram-бот -->
+    {% if car %}
+    <div class="card p-4 mb-8">
+        <div class="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+            <div class="text-sm text-slate-400">⛽ Заправки</div>
+            {% if fuel_totals.count %}
+            <div class="text-xs text-slate-500">
+                всего {{ '%.0f'|format(fuel_totals.litres) }} л · {{ '%.2f'|format(fuel_totals.cost) }} ₽
+                за {{ fuel_totals.count }} {{ 'заправку' if fuel_totals.count == 1 else ('заправки' if fuel_totals.count < 5 else 'заправок') }}
+            </div>
+            {% endif %}
+        </div>
+        {% if fuel_fills %}
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="text-xs text-slate-500">
+                    <tr class="border-b border-slate-800">
+                        <th class="text-left font-normal py-1">Дата</th>
+                        <th class="text-right font-normal py-1">Объём</th>
+                        <th class="text-right font-normal py-1">Цена за литр</th>
+                        <th class="text-right font-normal py-1">Стоимость</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for f in fuel_fills %}
+                    <tr class="border-b border-slate-800/60">
+                        <td class="py-1.5">{{ f.detected_at.strftime('%d.%m.%Y %H:%M') if f.detected_at else '—' }}</td>
+                        <td class="text-right">{{ '%.1f'|format(f.volume_litres) }} л</td>
+                        <td class="text-right">
+                            {% if f.price_per_litre is not none %}{{ '%.2f'|format(f.price_per_litre) }} ₽
+                            {% elif f.status == 'skipped' %}<span class="text-slate-500">—</span>
+                            {% else %}<span class="text-amber-400">ждёт цену</span>{% endif %}
+                        </td>
+                        <td class="text-right">
+                            {% if f.total_cost is not none %}{{ '%.2f'|format(f.total_cost) }} ₽{% else %}—{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="text-xs text-slate-500 mt-2">
+            Объём — разница уровней топлива между снимками. Цену Carp спрашивает в Telegram.
+        </div>
+        {% else %}
+        <div class="text-sm text-slate-500">
+            Заправок пока не было. Carp заметит прирост топлива при следующем сборе и спросит цену литра в Telegram.
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
 
     <!-- Диагностика: температуры, АКБ, ошибки OBD, автозапуск -->
     {% if car %}

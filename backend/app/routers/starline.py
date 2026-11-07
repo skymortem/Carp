@@ -217,6 +217,8 @@ async def fetch_data(
 
         return {"ok": True, "snap_id": extra["snap"].id,
                 "errors": len(extra.get("errors") or []),
+                "fuel_fill": ({"id": extra["fuel_fill"].id, "volume_litres": extra["fuel_fill"].volume_litres}
+                              if extra.get("fuel_fill") else None),
                 "data": {
             "ts": snapshot["ts"].isoformat(),
             "mileage_km": snapshot["mileage_km"],
@@ -229,6 +231,7 @@ async def fetch_data(
             "ctemperature": snapshot["ctemperature"],
             "etemperature": snapshot["etemperature"],
             "outside_temp": snapshot["outside_temp"],
+            "motohours_minutes": snapshot.get("motohours_minutes"),
         }}
 
     except StarLineError as e:
