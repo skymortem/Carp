@@ -104,7 +104,7 @@ async def test_dashboard_renders_freshness_badge(owner):
         await db.commit()
 
     html = (await owner.get("/dashboard")).text
-    # Таблица последних записей переехала на /reports, поэтому проверяем
-    # индикаторы, которые остались на дашборде.
-    assert "сбор раз в" in html
-    assert "Накопительные моточасы" in html
+    # Таблица последних записей и график переехали на /reports, поэтому
+    # проверяем индикаторы, которые остались на дашборде.
+    assert "Моточасы" in html
+    assert "Температура" in html
