@@ -151,6 +151,25 @@ async def test_dashboard_shows_diagnostics_cards(owner):
 
 
 @pytest.mark.asyncio
+async def test_autostart_is_enabled_by_condition_flags(owner):
+    """Реальный случай S96v2: state.r_start=false, но условия включены."""
+    async with async_session() as db:
+        db.add(StarSnap(car_id=1, ts=datetime.now(timezone.utc).replace(tzinfo=None), mileage_km=10))
+        db.add(DeviceSettings(car_id=1, fetched_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                              r_start_active=False, r_start_temp=-15, r_start_temp_on=True,
+                              r_start_battery=1180, r_start_battery_on=True))
+        await db.commit()
+
+    # В шаблоне число и единица разделены неразрывным пробелом — нормализуем.
+    html = (await owner.get("/dashboard")).text.replace("\u00a0", " ")
+    assert "Включён" in html
+    assert "по температуре -15 °C" in html
+    # Порог АКБ приходит в сотых вольта
+    assert "11.8 В" in html
+    assert "двигатель запущен автозапуском" not in html
+
+
+@pytest.mark.asyncio
 async def test_dashboard_reports_no_errors(owner):
     async with async_session() as db:
         db.add(StarSnap(car_id=1, ts=datetime.now(timezone.utc).replace(tzinfo=None), mileage_km=10))
