@@ -39,8 +39,6 @@ def describe_battery(raw_value, raw_type) -> Optional[dict]:
     return {"value": round(value, 1), "unit": "В", "low": value < 11.8, "kind": "volt"}
 
 
-RECENT_SNAPS_LIMIT = 20
-
 templates_dir = Path(__file__).resolve().parent.parent / "templates"
 jinja_env = Environment(
     loader=FileSystemLoader(str(templates_dir)),
@@ -86,9 +84,7 @@ async def dashboard_page(
     result = await db.execute(select(Car).where(Car.user_id == user.id).limit(1))
     car = result.scalar_one_or_none()
 
-    snaps = []
     latest = None
-    snap_count = 0
     service_plans = []
     starline_connected = False
     current_km = current_mh = None
@@ -102,39 +98,33 @@ async def dashboard_page(
     engine_since = None
 
     if car:
-        snap_count = await db.scalar(
-            select(func.count()).select_from(StarSnap).where(StarSnap.car_id == car.id)
-        ) or 0
-        result = await db.execute(
+        # Дашборд показывает только текущее состояние, поэтому берём один
+        # последний снимок. История (графики, таблицы по месяцам) — на /reports.
+        newest = (await db.execute(
             select(StarSnap).where(StarSnap.car_id == car.id)
-            .order_by(desc(StarSnap.ts), desc(StarSnap.id)).limit(RECENT_SNAPS_LIMIT)
-        )
-        snaps_orm = result.scalars().all()
-        snaps = [
-            {
-                "id": s.id,
-                "ts": s.ts.replace(tzinfo=timezone.utc).isoformat() if s.ts else None,
-                "mileage_km": s.mileage_km,
-                "fuel_litres": s.fuel_litres,
-                "fuel_percent": s.fuel_percent,
-                "speed_kmh": s.speed_kmh,
-                "is_moving": s.is_moving,
-                "engine_on": s.engine_on,
-                "is_armed": s.is_armed,
-                "gsm_lvl": s.gsm_lvl,
-                "battery_v": s.battery_v,
-                "battery_type": s.battery_type,
-                "outside_temp": s.outside_temp,
-                "ctemperature": s.ctemperature,
-                "etemperature": s.etemperature,
-                "motohours_minutes": s.motohours_minutes,
-                "lat": s.lat,
-                "lon": s.lon,
-                "created_at": s.created_at.replace(tzinfo=timezone.utc).isoformat() if s.created_at else None,
-            }
-            for s in snaps_orm
-        ]
-        latest = snaps[0] if snaps else None
+            .order_by(desc(StarSnap.ts), desc(StarSnap.id)).limit(1)
+        )).scalars().first()
+        latest = None if newest is None else {
+            "id": newest.id,
+            "ts": newest.ts.replace(tzinfo=timezone.utc).isoformat() if newest.ts else None,
+            "mileage_km": newest.mileage_km,
+            "fuel_litres": newest.fuel_litres,
+            "fuel_percent": newest.fuel_percent,
+            "speed_kmh": newest.speed_kmh,
+            "is_moving": newest.is_moving,
+            "engine_on": newest.engine_on,
+            "is_armed": newest.is_armed,
+            "gsm_lvl": newest.gsm_lvl,
+            "battery_v": newest.battery_v,
+            "battery_type": newest.battery_type,
+            "outside_temp": newest.outside_temp,
+            "ctemperature": newest.ctemperature,
+            "etemperature": newest.etemperature,
+            "motohours_minutes": newest.motohours_minutes,
+            "lat": newest.lat,
+            "lon": newest.lon,
+            "created_at": newest.created_at.replace(tzinfo=timezone.utc).isoformat() if newest.created_at else None,
+        }
         starline_connected = bool(car.starline_device_id)
         freshness = await car_freshness(db, car.id)
         collect_error = await health.last_error(db)
@@ -174,7 +164,7 @@ async def dashboard_page(
         service_plans.sort(key=lambda x: (not x["urgent"], x["name"]))
 
     return HTMLResponse(render("dashboard.html", request=request,
-        user=user, car=car, snaps=snaps, latest=latest, snap_count=snap_count,
+        user=user, car=car, latest=latest,
         freshness=freshness, starline_connected=starline_connected,
         battery=battery, device_settings=device_settings, obd_errors=obd_errors,
         initial_motohours=getattr(car, "initial_motohours", 0) if car else 0,

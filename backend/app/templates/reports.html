@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+{% block title %}Отчёты — Carp{% endblock %}
+{% block content %}
+<div class="flex flex-wrap items-baseline justify-between gap-2 mb-6">
+    <h1 class="text-2xl font-bold">
+        📊 Отчёты
+        {% if car and car.name %}<span class="text-lg text-slate-400 ml-2 font-normal">{{ car.name }}</span>{% endif %}
+    </h1>
+    <a href="/dashboard" class="text-sm text-blue-400 hover:text-blue-300">← К дашборду</a>
+</div>
+
+{% if not car %}
+<div class="card p-8 text-center">
+    <div class="text-4xl mb-3">📡</div>
+    <h2 class="text-xl font-bold mb-2">Данных пока нет</h2>
+    <p class="text-slate-400 mb-4">Подключи StarLine — история появится после первого сбора.</p>
+    <a href="/setup" class="btn-primary">Настроить</a>
+</div>
+{% else %}
+
+<div class="grid gap-6">
+    <div class="card p-6">
+        <div class="flex flex-wrap items-baseline justify-between gap-2 mb-4">
+            <h3 class="font-bold">📈 Пробег по месяцам</h3>
+            <span class="text-xs text-slate-500" id="mileageInfo">загрузка…</span>
+        </div>
+        <canvas id="mileageChart" height="110"></canvas>
+    </div>
+
+    <div class="card p-6">
+        <div class="flex flex-wrap items-baseline justify-between gap-2 mb-4">
+            <h3 class="font-bold">⛽ Расходы на топливо по месяцам</h3>
+            <span class="text-xs text-slate-500" id="fuelInfo">загрузка…</span>
+        </div>
+        <canvas id="fuelCostChart" height="110"></canvas>
+        <p class="text-xs text-slate-500 mt-3">
+            Сумма стоимостей заправок за месяц. Заправки без указанной цены в расчёт не входят.
+        </p>
+    </div>
+
+    <div class="card p-6">
+        <div class="flex flex-wrap items-baseline justify-between gap-2 mb-4">
+            <h3 class="font-bold">💰 Цена топлива</h3>
+            <span class="text-xs text-slate-500" id="priceInfo">загрузка…</span>
+        </div>
+        <canvas id="priceChart" height="110"></canvas>
+        <p class="text-xs text-slate-500 mt-3">
+            Цена литра по каждой заправке за последний год — видно, как она росла.
+        </p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const MONTH_NAMES = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+    const CHART_COLORS = {
+        accent: 'rgba(79,140,255,0.75)',
+        accentLine: '#4f8cff',
+        green: 'rgba(111,211,154,0.75)',
+        greenLine: '#6fd39a',
+        amberLine: '#e8b34b',
+        tick: '#6f7a88',
+        legend: '#8b94a3',
+        grid: 'rgba(255,255,255,0.06)',
+        gridSoft: 'rgba(255,255,255,0.04)',
+    };
+
+    function monthLabel(key) {
+        const [year, month] = key.split('-');
+        return MONTH_NAMES[parseInt(month, 10) - 1] + ' ' + year;
+    }
+
+    function baseOptions(unit) {
+        return {
+            responsive: true,
+            plugins: {
+                legend: { labels: { color: CHART_COLORS.legend } },
+                tooltip: { callbacks: { label: (ctx) => ctx.dataset.label + ': ' + ctx.parsed.y + ' ' + unit } },
+            },
+            scales: {
+                x: { ticks: { color: CHART_COLORS.tick }, grid: { color: CHART_COLORS.gridSoft } },
+                y: { ticks: { color: CHART_COLORS.tick, beginAtZero: true }, grid: { color: CHART_COLORS.grid } },
+            },
+        };
+    }
+
+    async function getJson(url) {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        return response.json();
+    }
+
+    // Пробег: суммируем суточные приросты (max - min внутри дня), а не
+    // «последний минус первый» — так пропуски сбора не занижают месяц.
+    function mileageByMonth(points) {
+        const months = {};
+        for (const point of points) {
+            if (point.mileage_max == null || point.mileage_min == null) continue;
+            const key = point.d.slice(0, 7);
+            months[key] = (months[key] || 0) + (point.mileage_max - point.mileage_min);
+        }
+        return months;
+    }
+
+    async function drawMileage() {
+        const info = document.getElementById('mileageInfo');
+        let payload;
+        try {
+            payload = await getJson('/api/series?days=3650');
+        } catch (e) {
+            info.textContent = 'не удалось загрузить историю';
+            return;
+        }
+        const points = payload.points || [];
+        const months = mileageByMonth(points);
+        const keys = Object.keys(months).sort();
+        if (!keys.length) {
+            info.textContent = 'недостаточно данных для графика';
+            return;
+        }
+
+        info.textContent = 'история: ' + points[0].d + ' … ' + points[points.length - 1].d +
+            ' (' + points.length + ' дн с данными)';
+
+        new Chart(document.getElementById('mileageChart'), {
+            type: 'bar',
+            data: {
+                labels: keys.map(monthLabel),
+                datasets: [{
+                    label: 'Пробег (км)',
+                    data: keys.map((key) => Math.round(months[key])),
+                    backgroundColor: CHART_COLORS.accent,
+                    borderColor: CHART_COLORS.accentLine,
+                    borderWidth: 1,
+                    borderRadius: 4,
+                    maxBarThickness: 56,
+                }],
+            },
+            options: baseOptions('км'),
+        });
+    }
+
+    async function drawFuel() {
+        const costInfo = document.getElementById('fuelInfo');
+        const priceInfo = document.getElementById('priceInfo');
+
+        let payload;
+        try {
+            payload = await getJson('/api/reports/fuel?days=365');
+        } catch (e) {
+            costInfo.textContent = 'не удалось загрузить заправки';
+            priceInfo.textContent = '';
+            return;
+        }
+
+        const months = payload.months || [];
+        if (!months.length) {
+            costInfo.textContent = 'заправок с ценой пока нет';
+            priceInfo.textContent = '';
+            return;
+        }
+
+        const totals = payload.totals || {cost: 0, litres: 0};
+        costInfo.textContent = 'всего ' + totals.cost.toFixed(2) + ' ₽ за ' +
+            totals.litres.toFixed(1) + ' л';
+
+        new Chart(document.getElementById('fuelCostChart'), {
+            type: 'bar',
+            data: {
+                labels: months.map((item) => monthLabel(item.m)),
+                datasets: [{
+                    label: 'Расходы (₽)',
+                    data: months.map((item) => item.cost),
+                    backgroundColor: CHART_COLORS.green,
+                    borderColor: CHART_COLORS.greenLine,
+                    borderWidth: 1,
+                    borderRadius: 4,
+                    maxBarThickness: 56,
+                }],
+            },
+            options: {
+                ...baseOptions('₽'),
+                plugins: {
+                    ...baseOptions('₽').plugins,
+                    tooltip: {
+                        callbacks: {
+                            afterLabel: (ctx) => {
+                                const item = months[ctx.dataIndex];
+                                return item ? item.litres + ' л · ' + item.fills + ' запр.' : '';
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        const prices = payload.prices || [];
+        if (!prices.length) {
+            priceInfo.textContent = 'цен пока нет';
+            return;
+        }
+        const first = prices[0], last = prices[prices.length - 1];
+        const change = first.price ? ((last.price - first.price) / first.price) * 100 : 0;
+        priceInfo.textContent = first.price.toFixed(2) + ' → ' + last.price.toFixed(2) + ' ₽' +
+            ' (' + (change >= 0 ? '+' : '') + change.toFixed(1) + '% за год)';
+
+        new Chart(document.getElementById('priceChart'), {
+            type: 'line',
+            data: {
+                labels: prices.map((item) => item.d ? item.d.slice(0, 10) : ''),
+                datasets: [{
+                    label: 'Цена литра (₽)',
+                    data: prices.map((item) => item.price),
+                    borderColor: CHART_COLORS.amberLine,
+                    backgroundColor: 'rgba(232,179,75,0.15)',
+                    borderWidth: 2,
+                    pointRadius: 3,
+                    pointBackgroundColor: CHART_COLORS.amberLine,
+                    tension: 0.25,
+                    fill: true,
+                }],
+            },
+            options: {
+                ...baseOptions('₽'),
+                // Цена меняется в пределах пары рублей — нулевая ось превратила
+                // бы график в ровную линию.
+                scales: {
+                    x: { ticks: { color: CHART_COLORS.tick, maxRotation: 0, autoSkipPadding: 24 },
+                         grid: { color: CHART_COLORS.gridSoft } },
+                    y: { beginAtZero: false, ticks: { color: CHART_COLORS.tick }, grid: { color: CHART_COLORS.grid } },
+                },
+            },
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        if (!document.getElementById('mileageChart')) return;
+        drawMileage();
+        drawFuel();
+    });
+</script>
+{% endblock %}

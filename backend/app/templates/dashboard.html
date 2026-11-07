@@ -226,17 +226,6 @@
     </div>
     {% endif %}
 
-    <!-- График пробега по месяцам -->
-    {% if snap_count > 1 %}
-    <div class="card p-6 mb-6">
-        <div class="flex flex-wrap items-baseline justify-between gap-2 mb-4">
-            <h3 class="font-bold">📈 Пробег по месяцам</h3>
-            <span class="text-xs text-slate-500" id="seriesInfo">загрузка…</span>
-        </div>
-        <canvas id="mileageChart" height="100"></canvas>
-    </div>
-    {% endif %}
-
     <!-- План ТО -->
     {% if service_plans %}
     <div class="card p-6 mb-6">
@@ -253,39 +242,9 @@
     </div>
     {% endif %}
 
-    <!-- Последние записи -->
-    {% if snaps %}
-    <div class="card p-6">
-        <div class="flex flex-wrap items-baseline justify-between gap-2 mb-4">
-            <h3 class="font-bold">📋 Последние записи</h3>
-            <span class="text-xs text-slate-500">всего снимков: {{ snap_count }}</span>
-        </div>
-        <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-                <thead>
-                    <tr class="text-slate-400 border-b border-slate-700">
-                        <th class="text-left py-2">Время</th>
-                        <th class="text-right py-2">Пробег</th>
-                        <th class="text-right py-2">Топливо</th>
-                        <th class="text-right py-2">Скорость</th>
-                        <th class="text-center py-2">Двигатель</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for snap in snaps %}
-                    <tr class="border-b border-slate-800">
-                        <td class="py-2">{{ snap.ts[:16].replace('T', ' ') if snap.ts else '—' }}</td>
-                        <td class="text-right">{{ snap.mileage_km if snap.mileage_km is not none else '—' }}</td>
-                        <td class="text-right">{{ '%.1f л'|format(snap.fuel_litres) if snap.fuel_litres is not none else '—' }}</td>
-                        <td class="text-right">{{ '%d км/ч'|format(snap.speed_kmh|int) if snap.speed_kmh else '—' }}</td>
-                        <td class="text-center">{{ '—' if snap.engine_on is none else ('🔥' if snap.engine_on else '⏹') }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+    <div class="text-sm">
+        <a href="/reports" class="text-blue-400 hover:text-blue-300">📊 Отчёты: пробег, расходы и цена топлива по месяцам →</a>
     </div>
-    {% endif %}
 </div>
 {% endblock %}
 
@@ -344,80 +303,5 @@
         if (hours < 24) return hours + ' ч назад';
         return Math.floor(hours / 24) + ' дн назад';
     }
-
-    document.addEventListener('DOMContentLoaded', async function() {
-        const mileCtx = document.getElementById('mileageChart');
-        if (!mileCtx) return;
-
-        let payload;
-        try {
-            const r = await fetch('/api/series?days=3650');
-            if (!r.ok) throw new Error('HTTP ' + r.status);
-            payload = await r.json();
-        } catch (e) {
-            document.getElementById('seriesInfo').textContent = 'не удалось загрузить историю';
-            return;
-        }
-
-        const points = payload.points || [];
-        if (points.length < 2) {
-            document.getElementById('seriesInfo').textContent = 'недостаточно данных для графика';
-            return;
-        }
-
-        // Дневные агрегаты → месяцы: сумма суточных пробегов (max - min внутри дня).
-        // Корректнее, чем «последний минус первый», когда в месяце есть пропуски сбора.
-        const months = {};
-        for (const p of points) {
-            if (p.mileage_max == null || p.mileage_min == null) continue;
-            const key = p.d.slice(0, 7);
-            months[key] = (months[key] || 0) + (p.mileage_max - p.mileage_min);
-        }
-
-        const labels = [], data = [];
-        const names = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
-        for (const key of Object.keys(months).sort()) {
-            const [y, m] = key.split('-');
-            labels.push(names[parseInt(m, 10) - 1] + ' ' + y);
-            data.push(months[key]);
-        }
-
-        document.getElementById('seriesInfo').textContent =
-            'история: ' + points[0].d + ' … ' + points[points.length - 1].d +
-            ' (' + points.length + ' дн с данными)';
-
-        new Chart(mileCtx, {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: 'Пробег (км)',
-                    data: data,
-                    backgroundColor: 'rgba(79,140,255,0.75)',
-                    borderColor: '#4f8cff',
-                    borderWidth: 1,
-                    borderRadius: 4,
-                    // Один месяц не должен растягиваться на пол-экрана.
-                    maxBarThickness: 56,
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: { labels: { color: '#8b94a3' } },
-                },
-                scales: {
-                    x: {
-                        ticks: { color: '#6f7a88' },
-                        grid: { color: 'rgba(255,255,255,0.04)' },
-                    },
-                    y: {
-                        ticks: { color: '#6f7a88', beginAtZero: true },
-                        grid: { color: 'rgba(255,255,255,0.06)' },
-                    }
-                }
-            }
-        });
-    });
 </script>
 {% endblock %}

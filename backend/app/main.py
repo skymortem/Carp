@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.migrations import run_migrations
-from app.routers import auth, starline, dashboard, service_plan, settings as settings_router
+from app.routers import auth, starline, dashboard, reports, service_plan, settings as settings_router
 from app.services import fuel, telegram
 from app.services.scheduler import start as start_scheduler, stop as stop_scheduler
 
@@ -79,6 +79,7 @@ async def robots(request: Request):
         "Disallow: /setup\n"
         "Disallow: /starline-console\n"
         "Disallow: /service-plan\n"
+        "Disallow: /reports\n"
         "Disallow: /auth/\n"
         "Disallow: /starline/\n"
         "Disallow: /api/\n"
@@ -104,4 +105,5 @@ app.include_router(auth.router)
 app.include_router(starline.router)
 app.include_router(dashboard.router)
 app.include_router(service_plan.router)
+app.include_router(reports.router)
 app.include_router(settings_router.router)

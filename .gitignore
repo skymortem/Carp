@@ -27,3 +27,6 @@ Thumbs.db
 *.key
 # Test tooling
 .pytest_cache/
+
+# Рабочие заметки — не для публичного репозитория
+docs/WIP.md
