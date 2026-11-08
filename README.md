@@ -97,4 +97,4 @@ backend/
 
 ## Лицензия
 
-Apache License 2.0. Английская версия README — [README.en.md](README.en.md).
+Apache License 2.0.
