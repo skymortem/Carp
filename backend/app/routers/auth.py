@@ -30,6 +30,24 @@ class LoginForm(BaseModel):
     password: str
 
 
+def set_session_cookie(response: Response, request: Request, user_id: int) -> None:
+    """Поставить сессионную куку.
+
+    SameSite=Lax, а не Strict: приложение на iPhone открывается с экрана
+    «Домой» как отдельное приложение, и первый переход с иконки Safari/WebKit
+    считает переходом «извне» — со Strict кука не приходит, и вместо дашборда
+    видно {"detail":"Not logged in"}. Lax отдаёт её при обычном переходе и всё
+    ещё не пускает межсайтовые POST, поэтому защита от CSRF не страдает.
+    Secure определяем по X-Forwarded-Proto: за nginx схема внутри процесса http.
+    """
+    forwarded = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
+    secure = request.url.scheme == "https" or forwarded == "https"
+    response.set_cookie(
+        "access_token", create_jwt(user_id), httponly=True, secure=secure,
+        samesite="lax", max_age=settings.jwt_expire_minutes * 60, path="/",
+    )
+
+
 @router.post("/register")
 async def register(body: RegisterForm, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     # This installation has one owner. Existing installations keep their data.
@@ -53,10 +71,7 @@ async def register(body: RegisterForm, request: Request, response: Response, db:
         raise HTTPException(403, "Владелец уже зарегистрирован")
     await db.refresh(user)
 
-    token = create_jwt(user.id)
-    response.set_cookie("access_token", token, httponly=True,
-        secure=request.url.scheme == "https", samesite="strict",
-        max_age=settings.jwt_expire_minutes * 60, path="/")
+    set_session_cookie(response, request, user.id)
     return {"ok": True, "user_id": user.id}
 
 
@@ -67,10 +82,7 @@ async def login(body: LoginForm, request: Request, response: Response, db: Async
     if not user or not verify_password(body.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    token = create_jwt(user.id)
-    response.set_cookie("access_token", token, httponly=True,
-        secure=request.url.scheme == "https", samesite="strict",
-        max_age=settings.jwt_expire_minutes * 60, path="/")
+    set_session_cookie(response, request, user.id)
     return {"ok": True, "user_id": user.id}
 
 

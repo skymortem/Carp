@@ -2,8 +2,11 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, PlainTextResponse, Response
+from urllib.parse import quote
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.migrations import run_migrations
@@ -35,6 +38,25 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Carp — Car Expense Tracker", lifespan=lifespan)
+
+@app.exception_handler(HTTPException)
+async def unauthenticated_redirect(request: Request, exc: HTTPException):
+    """Не оставлять человека в тупике с «{"detail":"Not logged in"}».
+
+    Веб-приложение с экрана «Домой» на iPhone хранит cookie отдельно от Safari,
+    и его сессия рано или поздно истекает. Раньше страница в этом случае
+    отдавала JSON ошибки 401: ни формы входа, ни ссылок — только текст. Для
+    обычного перехода (HTML) отправляем на /login с возвратом назад, для HTMX —
+    заголовком HX-Redirect. API продолжает отвечать JSON, как и раньше.
+    """
+    if exc.status_code == 401:
+        path = request.url.path
+        if request.headers.get("hx-request"):
+            return Response(status_code=401, headers={"HX-Redirect": "/login"})
+        if "text/html" in request.headers.get("accept", "") and not path.startswith("/api"):
+            return RedirectResponse(f"/login?next={quote(path)}", status_code=302)
+    return await http_exception_handler(request, exc)
+
 
 # Статика — создаём папку если нет
 static_dir = Path(__file__).resolve().parent / "static"
