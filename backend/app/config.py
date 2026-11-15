@@ -9,7 +9,9 @@ class Settings(BaseSettings):
     # JWT для веб-аутентификации
     secret_key: str = "change-me-to-something-secret-in-production"
     jwt_algorithm: str = "HS256"
-    jwt_expire_minutes: int = 60 * 24  # 24 часа
+    # Сессия на 30 дней: приложение с экрана «Домой» на iOS не делит cookie
+    # с Safari, и суточная кука означала вход заново каждый день.
+    jwt_expire_minutes: int = 60 * 24 * 30
 
     # StarLine API credentials (твои appId и secret)
     starline_app_id: Optional[str] = None

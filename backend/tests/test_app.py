@@ -15,13 +15,30 @@ async def test_registration_cookie_and_single_owner(client):
     assert response.status_code == 200
     assert 'token' not in response.json()
     assert 'HttpOnly' in response.headers['set-cookie']
-    assert 'SameSite=strict' in response.headers['set-cookie']
+    # Lax, а не Strict: иначе WebKit не отдаёт куку при запуске приложения
+    # с экрана «Домой» на iPhone (первый переход считается внешним).
+    assert 'SameSite=lax' in response.headers['set-cookie']
+    from app.config import settings
+    assert f'Max-Age={settings.jwt_expire_minutes * 60}' in response.headers['set-cookie']
     assert (await client.get('/auth/me')).status_code == 200
     assert (await client.post('/auth/register', json=dict(email='b@test', username='Other', password='secret123'))).status_code == 403
     await client.post('/auth/logout')
     assert (await client.get('/auth/me')).status_code == 401
     assert (await client.post('/auth/login', json=dict(email='a@test', password='secret123'))).status_code == 200
     assert (await client.post('/auth/login', json=dict(email='a@test', password='x'*100))).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_page_without_session_redirects_to_login(client):
+    """Без сессии страница ведёт на форму входа, а не отдаёт JSON 401."""
+    response = await client.get('/dashboard', headers={'accept': 'text/html'})
+    assert response.status_code == 302
+    assert response.headers['location'] == '/login?next=/dashboard'
+    htmx = await client.get('/starline/status', headers={'HX-Request': 'true'})
+    assert htmx.status_code == 401
+    assert htmx.headers['HX-Redirect'] == '/login'
+    # API остаётся JSON-ом: клиентам редирект вместо тела не нужен.
+    assert (await client.get('/api/series', headers={'accept': 'text/html'})).status_code == 401
 
 
 @pytest.mark.asyncio
